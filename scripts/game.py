@@ -1,0 +1,92 @@
+"""Single-game resolution plus shared GameRecord assembly helpers."""
+import re
+from urllib.parse import urlsplit
+
+from config import valid_appid
+from error_handler import Failure
+from scripts.persistence import index_app, normalize
+
+
+def block(state="not_requested", source=None, fetched_at=None, **fields):
+    return dict(state=state, source=source, fetched_at=fetched_at, **fields)
+
+
+def record(appid, steamid, name=None):
+    return dict(appid=appid, name=name, app_type=None,
+        store_url=f"https://store.steampowered.com/app/{appid}/",
+        ownership=block("unavailable", owned_by_self=None, owned_by_other_family_members=None,
+                        available_via_family=None, owner_steamids=None, shared_exclusion_reason=None),
+        wishlist=block(present=None, priority=None, date_added=None),
+        playtime=block(subject_steamid=steamid or None, total_minutes=None, last_2weeks_minutes=None,
+                       last_played_at=None, platform_minutes={}, unit="minutes"),
+        achievements=block(subject_steamid=steamid or None, total=None, unlocked=None, completion_ratio=None, items=[]),
+        stats=block(subject_steamid=steamid or None, items=[]), store=block(data=None))
+
+
+def add_result(document, key, result, **extra):
+    document["coverage"][key] = dict(state=result.state, source=result.source, fetched_at=result.fetched_at,
+        complete=result.data.get("complete") if result.state == "ok" else None,
+        count=len(result.data["items"]) if "items" in result.data else None,
+        error_id=result.error["error_id"] if result.error else None, **extra)
+    if result.error and not any(e["error_id"] == result.error["error_id"] for e in document["errors"]):
+        document["errors"].append(result.error)
+
+
+def parse_target(query=None, appid=None):
+    if appid is not None:
+        if query or not valid_appid(appid):
+            raise Failure("CONFIG_INVALID", "Use either a valid AppID or one game query", scope="feature")
+        return appid
+    if not isinstance(query, str) or not query.strip():
+        raise Failure("CONFIG_INVALID", "A game name, AppID or official app URL is required", scope="feature")
+    query = query.strip()
+    if query.isascii() and query.isdigit():
+        return parse_target(appid=int(query))
+    if "://" in query:
+        url = urlsplit(query)
+        match = re.fullmatch(r"/app/([0-9]+)(?:/[^?#]*)?", url.path)
+        if url.scheme not in {"http", "https"} or url.netloc != "store.steampowered.com" or not match:
+            raise Failure("CONFIG_INVALID", "Only official store app URLs are supported; sub/bundle are unsupported", scope="feature")
+        return parse_target(appid=int(match[1]))
+    return None
+
+
+async def enrich_store(registry, config, document, item):
+    result = await registry.call("get_app_details", {"appid": item["appid"], "language": config.language, "country": config.country},
+                                 {"task_id": f"app-{item['appid']}"})
+    add_result(document, f"store:{item['appid']}", result)
+    item["store"] = block(result.state, result.source, result.fetched_at,
+                          error_id=result.error["error_id"] if result.error else None,
+                          data=result.data if result.state == "ok" else None)
+    if result.state == "ok":
+        item["name"] = result.data.get("name") or item["name"]
+        item["app_type"] = result.data.get("type")
+    index_app(document, item["appid"], item["name"], result.source)
+
+
+async def run(registry, config, document, runtime, *, query=None, appid=None):
+    appid = parse_target(query, appid)
+    name = None
+    if appid is None:
+        result = await registry.call("search_games", {"query": query, "language": config.language, "country": config.country})
+        add_result(document, "search", result)
+        candidates = result.data.get("items", [])
+        for candidate in candidates:
+            index_app(document, candidate["appid"], candidate["name"], "search_games")
+        exact = [c for c in candidates if normalize(c["name"]) == normalize(query)]
+        document["data"]["resolution"] = dict(query=query, candidates=candidates, selected_appid=None)
+        if result.state != "ok":
+            document["status"] = "failed"
+            return
+        if len(exact) != 1:
+            document["status"] = "needs_selection"
+            return
+        appid, name = exact[0]["appid"], exact[0]["name"]
+    document["data"]["resolution"] = {**(document["data"]["resolution"] or {}), "selected_appid": appid}
+    item = record(appid, config.steamid, name)
+    document["data"]["items"].append(item)
+    index_app(document, appid, name)
+    await enrich_store(registry, config, document, item)
+    document["coverage"]["account"] = dict(state="not_requested", complete=None,
+        note="Account enrichment is introduced in stage 4; no ownership assertion is made")
+    document["status"] = "ok" if item["store"]["state"] == "ok" else "partial"

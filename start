@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+  printf '%s\n' '请在项目目录安装：python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt' >&2
+  exit 1
+fi
+if ! "$PROJECT_ROOT/.venv/bin/python" -c 'import httpx, dotenv' 2>/dev/null; then
+  printf '%s\n' '依赖缺失：在项目目录执行 .venv/bin/python -m pip install -r requirements.txt' >&2
+  exit 1
+fi
+exec "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/main.py" "$@"

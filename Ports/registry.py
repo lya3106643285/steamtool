@@ -83,4 +83,10 @@ class Registry:
 
 
 def build_registry(executor):
-    return Registry(executor)
+    from Ports import get_app_details, search_games
+    registry = Registry(executor)
+    registry.register(Tool("get_app_details", get_app_details.call, rate_scope="store.steampowered.com",
+                           required=("appid", "language", "country")))
+    registry.register(Tool("search_games", search_games.call, rate_scope="store.steampowered.com",
+                           required=("query", "language", "country")))
+    return registry
