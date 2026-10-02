@@ -1,0 +1,86 @@
+"""Explicit registration, validation, auth checks, successful run cache/single-flight."""
+import asyncio
+from copy import deepcopy
+from dataclasses import dataclass
+import json
+
+from config import valid_appid, valid_steamid
+from error_handler import Failure
+from Ports.request_executor import Result
+
+
+@dataclass(frozen=True)
+class Tool:
+    name: str
+    callable: object
+    auth_kind: str = "none"
+    rate_scope: str = "api.steampowered.com"
+    read_only: bool = True
+    capability_status: str = "implemented"
+    required: tuple = ()
+    optional: tuple = ()
+
+
+class Registry:
+    def __init__(self, executor):
+        self.executor = executor
+        self.tools, self.cache, self.inflight = {}, {}, {}
+
+    def register(self, tool):
+        if tool.name in self.tools or not tool.read_only or tool.auth_kind not in {"none", "user_key", "session_token"}:
+            raise Failure("CONFIG_INVALID", "Duplicate or unsafe tool registration", api=tool.name)
+        self.tools[tool.name] = tool
+
+    async def call(self, name, params=None, context=None):
+        params, context = dict(params or {}), dict(context or {})
+        context.setdefault("appid", params.get("appid"))
+        context.setdefault("subject_steamid", params.get("steamid"))
+        try:
+            tool = self.tools.get(name)
+            if tool is None:
+                raise Failure("TOOL_NOT_FOUND", "Tool is not registered", api=name)
+            if tool.capability_status == "disabled":
+                raise Failure("DATA_UNAVAILABLE", "Tool is disabled", api=name)
+            if set(params) - set(tool.required + tool.optional) or set(tool.required) - params.keys():
+                raise Failure("CONFIG_INVALID", "Invalid tool parameter names", api=name)
+            if "appid" in params and not valid_appid(params["appid"]):
+                raise Failure("CONFIG_INVALID", "AppID must be a positive uint32", api=name)
+            if "steamid" in params and not valid_steamid(params["steamid"]):
+                raise Failure("CONFIG_INVALID", "SteamID64 required", api=name)
+            config = self.executor.config
+            if (tool.auth_kind == "user_key" and not config.api_key) or (tool.auth_kind == "session_token" and not config.family_token):
+                raise Failure("AUTH_REQUIRED", "Configure credentials locally for this source", api=name)
+            if tool.auth_kind in self.executor.disabled_auth:
+                raise Failure(self.executor.disabled_auth[tool.auth_kind], "Authentication source disabled for this run", api=name)
+        except Failure as exc:
+            return Result("unavailable", error=exc.info, source=name)
+        key = (name, json.dumps(params, sort_keys=True, ensure_ascii=True, allow_nan=False))
+        reused = key in self.cache or key in self.inflight
+        if key in self.cache:
+            result = deepcopy(self.cache[key])
+        else:
+            if key not in self.inflight:
+                self.inflight[key] = asyncio.create_task(tool.callable(self.executor, params, context))
+            task = self.inflight[key]
+            try:
+                result = deepcopy(await asyncio.shield(task))
+                if result.state in {"ok", "not_applicable"}:
+                    self.cache[key] = deepcopy(result)
+            finally:
+                if task.done():
+                    self.inflight.pop(key, None)
+        if reused:
+            result.from_run_cache = True
+            self.executor.event("run_cache_hit", api=name, **context)
+        return result
+
+    async def close(self):
+        tasks = list(self.inflight.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self.inflight.clear()
+
+
+def build_registry(executor):
+    return Registry(executor)
