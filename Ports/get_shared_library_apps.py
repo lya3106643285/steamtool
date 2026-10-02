@@ -5,6 +5,9 @@ from Ports.get_family_group_for_user import token_subject
 from Ports.request_executor import RequestSpec, object_at, app_items, selected, Result
 
 MAX_APPS = 10000
+# ESharedLibraryExcludeReason in steam/steammessages_familygroups.steamclient.proto.
+# Unassigned gaps 5 and 14 and future enum values are deliberately not interpreted.
+KNOWN_EXCLUDED_REASONS = frozenset({1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, *range(15, 31)})
 
 
 async def call(executor, params, context):

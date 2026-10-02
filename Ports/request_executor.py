@@ -3,13 +3,12 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import random
-import ssl
 import time
 from urllib.parse import urlsplit
 import uuid
 
 import httpx
-from error_handler import Failure, decide, retry_after_seconds
+from error_handler import Failure, decide, classify_http, classify_transport
 
 
 @dataclass
@@ -38,7 +37,15 @@ class RequestSpec:
 def object_at(body, key):
     if not isinstance(body, dict) or not isinstance(body.get(key), dict):
         raise Failure("RESPONSE_INVALID", f"Expected object: {key}")
-    return body[key]
+    result = body[key]
+    if key == "response":
+        if result.get("success") is False or result.get("error"):
+            raise Failure("DATA_UNAVAILABLE", "Upstream reported an application failure")
+        code = result.get("eresult")
+        if code is not None and str(code) != "1":
+            mapped = {"5": "AUTH_EXPIRED", "15": "ACCESS_DENIED", "84": "RATE_LIMITED", "16": "UPSTREAM_UNAVAILABLE"}.get(str(code), "DATA_UNAVAILABLE")
+            raise Failure(mapped, "Upstream reported failure", upstream_code=code)
+    return result
 
 
 def selected(data, keys):
@@ -107,14 +114,18 @@ class Executor:
                 raise Failure("REQUEST_DEADLINE_EXCEEDED", "Logical request budget exhausted", source="executor")
             # Acquire capacity only to check admission and immediately send/release.
             await self.semaphore.acquire()
-            async with self.gate:
-                now = self.clock()
-                wait = max(0., max(self.next_send.get(s, 0) for s in scopes) - now,
-                           self.cooldowns.get(host, 0) - now)
-                if not wait and not self.stopping.is_set():
-                    for scope, rps in scopes.items():
-                        self.next_send[scope] = now + 1 / rps
-                    return (self.clock() - start) * 1000, throttled * 1000
+            try:
+                async with self.gate:
+                    now = self.clock()
+                    wait = max(0., max(self.next_send.get(s, 0) for s in scopes) - now,
+                               self.cooldowns.get(host, 0) - now)
+                    if not wait and not self.stopping.is_set():
+                        for scope, rps in scopes.items():
+                            self.next_send[scope] = now + 1 / rps
+                        return (self.clock() - start) * 1000, throttled * 1000
+            except BaseException:
+                self.semaphore.release()
+                raise
             self.semaphore.release()
             if expires is not None and self.clock() + wait >= expires:
                 raise Failure("REQUEST_DEADLINE_EXCEEDED", "Cooldown or queue exceeds request budget", source="executor")
@@ -162,10 +173,7 @@ class Executor:
                     acquired = False
                     status = response.status_code
                     if status != 200:
-                        code = ("RATE_LIMITED" if status == 429 else "ACCESS_DENIED" if status in {401, 403}
-                                else "UPSTREAM_UNAVAILABLE" if status in {500, 502, 503, 504} else "DATA_UNAVAILABLE")
-                        raise Failure(code, "HTTP request failed", source="http", http_status=status,
-                                      retry_after=retry_after_seconds(response.headers.get("retry-after")))
+                        raise classify_http(status, response.headers.get("retry-after"))
                     check_upstream(response)
                     try:
                         body = response.json()
@@ -183,16 +191,8 @@ class Executor:
                 last = exc
             except TimeoutError:
                 last = Failure("REQUEST_DEADLINE_EXCEEDED", "Logical request budget exhausted", source="executor")
-            except httpx.TimeoutException as exc:
-                last = Failure("NETWORK_TIMEOUT", "HTTP timeout", source="transport", exception_type=type(exc).__name__)
             except httpx.TransportError as exc:
-                chain, current = [], exc
-                while current is not None and len(chain) < 10:
-                    chain.append(current)
-                    current = current.__cause__ or current.__context__
-                certificate = any(isinstance(e, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(e) for e in chain)
-                last = Failure("NETWORK_ERROR", "TLS validation failed" if certificate else "HTTP transport failed",
-                               source="transport", exception_type=type(exc).__name__, retryable=not certificate)
+                last = classify_transport(exc)
             except (KeyError, TypeError, ValueError) as exc:
                 last = Failure("RESPONSE_INVALID", "Unexpected response shape", exception_type=type(exc).__name__)
             except Exception as exc:

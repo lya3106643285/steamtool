@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import re
 
 from config import valid_appid, valid_steamid
 from error_handler import Failure
@@ -47,6 +48,15 @@ class Registry:
                 raise Failure("CONFIG_INVALID", "AppID must be a positive uint32", api=name)
             if "steamid" in params and not valid_steamid(params["steamid"]):
                 raise Failure("CONFIG_INVALID", "SteamID64 required", api=name)
+            for key in ("language", "country", "query", "vanity", "family_groupid"):
+                if key in params and (not isinstance(params[key], str) or not params[key].strip()):
+                    raise Failure("CONFIG_INVALID", "Invalid parameter type: " + key, api=name)
+            if "language" in params and not re.fullmatch(r"[a-zA-Z_-]{2,32}", params["language"]):
+                raise Failure("CONFIG_INVALID", "Invalid language", api=name)
+            if "country" in params and not re.fullmatch(r"[A-Za-z]{2}", params["country"]):
+                raise Failure("CONFIG_INVALID", "Invalid country", api=name)
+            if "include_family_licenses" in params and type(params["include_family_licenses"]) is not bool:
+                raise Failure("CONFIG_INVALID", "include_family_licenses must be boolean", api=name)
             config = self.executor.config
             if (tool.auth_kind == "user_key" and not config.api_key) or (tool.auth_kind == "session_token" and not config.family_token):
                 raise Failure("AUTH_REQUIRED", "Configure credentials locally for this source", api=name)
@@ -60,7 +70,18 @@ class Registry:
             result = deepcopy(self.cache[key])
         else:
             if key not in self.inflight:
-                self.inflight[key] = asyncio.create_task(tool.callable(self.executor, params, context))
+                async def invoke():
+                    try:
+                        result = await tool.callable(self.executor, params, context)
+                        if result.error:
+                            result.error.update(api=name, appid=params.get("appid"), subject_steamid=params.get("steamid"))
+                        return result
+                    except Failure as exc:
+                        if exc.code in {"INTERNAL_ERROR", "LOG_WRITE_FAILED"}:
+                            raise
+                        exc.info.update(api=name, appid=params.get("appid"), subject_steamid=params.get("steamid"))
+                        return Result("unavailable", error=exc.info, source=name)
+                self.inflight[key] = asyncio.create_task(invoke())
             task = self.inflight[key]
             try:
                 result = deepcopy(await asyncio.shield(task))
@@ -71,7 +92,7 @@ class Registry:
                     self.inflight.pop(key, None)
         if reused:
             result.from_run_cache = True
-            self.executor.event("run_cache_hit", api=name, **context)
+            self.executor.event("run_cache_hit", module=__name__, api=name, **context)
         return result
 
     async def close(self):

@@ -3,6 +3,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import uuid
+import math
+import ssl
+import httpx
 
 
 class Failure(Exception):
@@ -38,7 +41,8 @@ def retry_after_seconds(value, now=None):
         return None
     try:
         if str(value).strip().isdigit():
-            return float(value)
+            seconds = float(value)
+            return seconds if math.isfinite(seconds) else None
         date = parsedate_to_datetime(value)
         if date.tzinfo is None:
             date = date.replace(tzinfo=timezone.utc)
@@ -60,3 +64,22 @@ def decide(error, *, attempt, remaining, config, scope, jitter=.5, read_only=Tru
     if wait >= remaining:
         return Decision("skip", wait, cooldown, "request budget exhausted")
     return Decision("cooldown_then_retry" if cooldown else "retry", wait, cooldown, error.code)
+
+
+def classify_http(status, retry_after=None):
+    code = ("RATE_LIMITED" if status == 429 else "ACCESS_DENIED" if status in {401, 403}
+            else "UPSTREAM_UNAVAILABLE" if status in {500, 502, 503, 504} else "DATA_UNAVAILABLE")
+    return Failure(code, "HTTP request failed", source="http", http_status=status,
+                   retry_after=retry_after_seconds(retry_after))
+
+
+def classify_transport(exc):
+    if isinstance(exc, httpx.TimeoutException):
+        return Failure("NETWORK_TIMEOUT", "HTTP timeout", source="transport", exception_type=type(exc).__name__)
+    chain, current = [], exc
+    while current is not None and len(chain) < 10:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    certificate = any(isinstance(e, ssl.SSLError) or "CERTIFICATE_VERIFY_FAILED" in str(e) for e in chain)
+    return Failure("NETWORK_ERROR", "TLS validation failed" if certificate else "HTTP transport failed",
+                   source="transport", exception_type=type(exc).__name__, retryable=not certificate)

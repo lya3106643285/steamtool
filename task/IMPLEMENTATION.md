@@ -46,3 +46,56 @@
 业务合成测试覆盖零时长、借玩/自有/双方持有、未玩家庭候选、未知排除枚举、失败成就不补零、平台时长不相加、缺价、愿望单去重/缺详情/数量不符/明确空清单、HTTP 200 异常结构、单游戏请求范围。
 SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未知非零枚举目前保留原值和 available_via_family=null，未根据未验证枚举猜测。
 尚未配置私人凭据，以上均为合成测试；不宣称私人愿望单、本人库或完整家庭库已实测。
+
+## 阶段 5
+
+完成交互菜单、doctor、单实例 flock、进程启动标识/boot ID/UID/项目/命令行校验和 pidfd 停止。SIGINT/SIGTERM/stop 停止派发和等待，并在宽限后取消剩余任务；集合逐个完成时立即保留已取得 ID，取消不会丢掉此前集合与详情。默认不强杀。
+
+补全日志初始化、运行中及发布后失败路径；发布后失败只可原子更正本轮相同 run_id 的文件。补全统一 HTTP/传输错误分类、HTTP 200 内上游失败、未知异常终态、DLC ID 映射和并发日志关联。
+
+最终检查命令与结果：
+
+| 命令 | 实际结果 |
+|---|---|
+| `.venv/bin/python -m pytest -q` | **61 passed in 4.18s**；无真实凭据、默认不联网 |
+| `.venv/bin/python -m compileall -q main.py config.py error_handler.py Ports scripts` | 退出 0 |
+| `.venv/bin/python -m pip check` | `No broken requirements found.` |
+| `bash -n start stop` | 退出 0 |
+| `git diff --check` | 退出 0，无空白错误 |
+| `./start doctor` | JSON status=partial；公开 appdetails 探测成功；三项账号配置均为 false，按预期报告能力不足 |
+| `./start game 'Portal 2'` | 退出 0；storesearch 成功、唯一精确候选 AppID 620、详情成功、JSON status=ok |
+| `./stop`（无实例） | 退出 0，报告锁已释放，无其他进程受影响 |
+
+真实公开探测证据（UTC）：
+
+- 2026-10-02T16:12Z：AppID 292030 appdetails HTTP 200，返回名称“巫师3：狂猎 — 重制版”。
+- 2026-10-02T16:40Z：doctor 再次成功探测公开详情；配置能力不足与探测结果分别表达。
+- 2026-10-02T16:40Z：搜索 Portal 2 并查询 AppID 620 详情成功。结果与运行日志保存在本地 Outputs，未提交真实网络响应文件。
+- 对应北京时间日期为 2026-10-03。以上均为匿名商店请求，不是账号验收。
+
+离线性能单独测量：MockTransport 固定每次响应延迟 5ms，100 个请求，发送速率设为不构成瓶颈。并发 1：100 成功，0.5522s，实际峰值 1；并发 4：100 成功，0.1526s，实际峰值 4。不将该约 3.62 倍样本加速比宣称为 Steam 线上保证。
+
+新增 [验收矩阵](ACCEPTANCE.md) 覆盖任务书 A01–D09；README 包含 WSL 安装、配置、命令、错误码、输出、并发和停止流程。[合成 JSON](examples/synthetic_game.json) 与 [合成 runtime JSONL](examples/synthetic_game.runtime.jsonl) 显式标记 MockTransport 数据；未提交凭据或私人库清单。
+
+### 最终协议细化及调整
+
+1. 家庭排除枚举在原始 [steammessages_familygroups.steamclient.proto](https://github.com/SteamTracking/Protobufs/blob/bd86e4c6419d40f9a5de222d8b9f68fb3a1fde07/steam/steammessages_familygroups.steamclient.proto) 中复核。明确 0 代表 Included；已知 1–4、6–13、15–30 表达排除，5/14 及未来未知值保留资格未知。此项替代阶段 4 的临时保守处理，但仍不代表真实账户验证。
+2. 愿望单协议固定参考 [fcbb9a107a0ff5293385f24d6c774eeb5e3d4c84](https://github.com/SteamTracking/Protobufs/blob/fcbb9a107a0ff5293385f24d6c774eeb5e3d4c84/webui/service_wishlist.proto)。省略 repeated items 的 JSON 行为仍未实测；因此省略字段保守不可用，只有显式空列表与明确零数量可证明空。
+3. 未知家庭统计主体/单位的 rt_playtime 不导出，而非放入含糊 raw；已确认本人接口字段保留分钟语义。
+4. 原子发布采用临时文件 + 同目录硬链接，避免 replace 覆盖旧运行；只有发布后日志故障允许核对 run_id 后更正本轮文件。
+5. 家庭列表固定 max_apps=10000 且 complete=false；达到上限额外标记。宁可明确保留完整性限制，也不宣称已取得全家庭库。
+6. 名称歧义统一输出候选，由用户下一次指定 AppID；菜单也使用此路径，不再引入另一套名称猜测机制。
+7. 不实现可选 all、全目录、跨运行缓存；未添加额外业务层，scripts 仍为五个职责文件。
+
+### 最终交付状态
+
+| 功能/支撑 | 实现 | 离线/本地验证 | 真实联调 |
+|---|---|---|---|
+| 愿望单 | 完成 | 通过 | 未执行，缺本地 SteamID |
+| 本人库/时长/成就/统计 | 完成 | 通过 | 未执行，缺个人 Key |
+| 家庭候选/资格 | 完成，实验性 | 通过 | 未执行，缺本人 token；完整性仍未验收 |
+| 单游戏 | 完成 | 通过 | 公开搜索/详情成功，账号关系未执行 |
+| 注册、错误、并发、复用、JSON、日志 | 完成 | 通过 | 公开执行路径成功，其余以离线证据为准 |
+| start/stop、菜单、doctor | 完成 | 实际子进程测试通过 | 本机命令和公开探测成功 |
+
+私人愿望单、本人库、include_family_licenses、家庭四类样本和完整性 live 验收仍待本地凭据。未进行自动登录、Key/token 获取、写账号操作、远端创建、推送或发布。

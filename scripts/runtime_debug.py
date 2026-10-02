@@ -18,7 +18,7 @@ def utcnow():
 
 
 class Redactor:
-    secret_key = re.compile(r"(?i)(?:key|api[_-]?key|.*token|cookie|authorization|password|proxy.*)")
+    secret_key = re.compile(r"(?i)(?:key|.*api[_-]?key|.*token|cookie|set-cookie|authorization|password|proxy.*)")
 
     def __init__(self, secrets=()):
         self.secrets = sorted({s for value in secrets if value for s in (value, quote(value, safe=""))}, key=len, reverse=True)
@@ -31,9 +31,11 @@ class Redactor:
         if isinstance(value, str):
             for secret in self.secrets:
                 value = value.replace(secret, "[REDACTED]")
-            value = re.sub(r"(?i)(https?://)[^\s/@]+:[^\s/@]+@", r"\1[REDACTED]@", value)
+            value = re.sub(r"(?i)([a-zA-Z][a-zA-Z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", r"\1[REDACTED]@", value)
             value = re.sub(r"(?i)([?&](?:key|api_key|access_token|refresh_token|token|cookie|authorization)=)[^&\s\"']+", r"\1[REDACTED]", value)
             value = re.sub(r"(?i)(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+", "[REDACTED]", value)
+            value = re.sub(r"(?i)(\b(?:api_key|access_token|refresh_token|password)\s*[=:]\s*)[^&\s\"',;]+", r"\1[REDACTED]", value)
+            value = re.sub(r"(?im)((?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+", r"\1[REDACTED]", value)
         return value
 
 

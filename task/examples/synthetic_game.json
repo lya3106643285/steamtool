@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0.0",
+  "meta": {
+    "run_id": "synthetic-example",
+    "feature": "game",
+    "started_at": "2026-10-02T16:49:56.601435Z",
+    "finished_at": "2026-10-02T16:49:56.605195Z",
+    "subject_steamid": null,
+    "language": "schinese",
+    "store_country": "CN",
+    "evidence": "Synthetic MockTransport response; not a real Steam result",
+    "runtime_summary": {
+      "wall_duration_ms": 3.748,
+      "http_attempts": 1,
+      "logical_requests": 1,
+      "retries": 0,
+      "rate_limits": 0,
+      "cache_hits": 0,
+      "tasks": {
+        "total": 1,
+        "pending": 0,
+        "running": 0,
+        "success": 1,
+        "failed": 0,
+        "skipped": 0,
+        "cancelled": 0
+      },
+      "phase_duration_ms": {}
+    }
+  },
+  "status": "ok",
+  "data": {
+    "items": [
+      {
+        "appid": 1000000001,
+        "name": "合成示例游戏（非真实数据）",
+        "app_type": "game",
+        "store_url": "https://store.steampowered.com/app/1000000001/",
+        "ownership": {
+          "state": "unavailable",
+          "source": null,
+          "fetched_at": null,
+          "owned_by_self": null,
+          "owned_by_other_family_members": null,
+          "available_via_family": null,
+          "owner_steamids": null,
+          "shared_exclusion_reason": null
+        },
+        "wishlist": {
+          "state": "not_requested",
+          "source": null,
+          "fetched_at": null,
+          "present": null,
+          "priority": null,
+          "date_added": null
+        },
+        "playtime": {
+          "state": "not_requested",
+          "source": null,
+          "fetched_at": null,
+          "subject_steamid": null,
+          "total_minutes": null,
+          "last_2weeks_minutes": null,
+          "last_played_at": null,
+          "platform_minutes": {},
+          "unit": "minutes"
+        },
+        "achievements": {
+          "state": "not_requested",
+          "source": null,
+          "fetched_at": null,
+          "subject_steamid": null,
+          "total": null,
+          "unlocked": null,
+          "completion_ratio": null,
+          "items": []
+        },
+        "stats": {
+          "state": "not_requested",
+          "source": null,
+          "fetched_at": null,
+          "subject_steamid": null,
+          "items": []
+        },
+        "store": {
+          "state": "ok",
+          "source": "get_app_details",
+          "fetched_at": "2026-10-02T16:49:56.604954+00:00",
+          "error_id": null,
+          "data": {
+            "steam_appid": 1000000001,
+            "name": "合成示例游戏（非真实数据）",
+            "type": "game",
+            "short_description": "This is a synthetic fixture, not a real store response."
+          }
+        }
+      }
+    ],
+    "resolution": {
+      "selected_appid": 1000000001
+    },
+    "summary": {}
+  },
+  "id_map": {
+    "1000000001": {
+      "canonical_name": "合成示例游戏（非真实数据）",
+      "state": "ok",
+      "source": "get_app_details"
+    }
+  },
+  "name_index": {
+    "合成示例游戏(非真实数据)": [
+      1000000001
+    ]
+  },
+  "coverage": {
+    "store:1000000001": {
+      "state": "ok",
+      "source": "get_app_details",
+      "fetched_at": "2026-10-02T16:49:56.604954+00:00",
+      "complete": null,
+      "count": null,
+      "error_id": null
+    },
+    "account": {
+      "state": "not_requested",
+      "complete": null,
+      "note": "STEAM_ID not configured; public store scope only, ownership remains null"
+    }
+  },
+  "errors": []
+}

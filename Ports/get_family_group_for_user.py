@@ -1,6 +1,7 @@
 """Conservative identity binding. JWT claims alone never prove authentication."""
 import base64
 import json
+import math
 import time
 from config import valid_steamid
 from error_handler import Failure
@@ -15,7 +16,7 @@ def token_subject(token):
         payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
         if not isinstance(payload, dict) or not valid_steamid(payload.get("sub")):
             return None
-        if type(payload.get("exp")) not in (int, float) or payload["exp"] <= time.time():
+        if type(payload.get("exp")) not in (int, float) or not math.isfinite(payload["exp"]) or payload["exp"] <= time.time():
             raise Failure("AUTH_EXPIRED", "Session expiration claim has elapsed", source="auth")
         return payload["sub"]
     except (ValueError, UnicodeError, TypeError):

@@ -13,6 +13,12 @@ async def collect_wishlist(registry, config, document):
         result = await registry.call(name, {"steamid": config.steamid})
         results[key] = result
         add_result(document, key, result)
+        if key == "wishlist" and document["meta"]["feature"] == "wishlist" and result.state == "ok":
+            for appid in sorted({row["appid"] for row in result.data["items"]}):
+                item = record(appid, config.steamid)
+                merge_wish(item, result, False)
+                document["data"]["items"].append(item)
+                index_app(document, appid)
     async with asyncio.TaskGroup() as tasks:
         tasks.create_task(get("wishlist", "get_wishlist"))
         tasks.create_task(get("wishlist_count", "get_wishlist_item_count"))
@@ -39,6 +45,7 @@ async def run(registry, config, document, runtime):
     if wishes.state != "ok":
         document["status"] = "failed"
         return
+    document["data"]["items"].clear()
     for appid in sorted({row["appid"] for row in wishes.data["items"]}):
         item = record(appid, config.steamid)
         merge_wish(item, wishes, complete)

@@ -25,7 +25,7 @@ def record(appid, steamid, name=None):
 
 def add_result(document, key, result, **extra):
     document["coverage"][key] = dict(state=result.state, source=result.source, fetched_at=result.fetched_at,
-        complete=result.data.get("complete") if result.state == "ok" else None,
+        complete=result.data.get("complete") if result.state in {"ok", "not_applicable"} else None,
         count=len(result.data["items"]) if "items" in result.data else None,
         error_id=result.error["error_id"] if result.error else None, **extra)
     if result.error and not any(e["error_id"] == result.error["error_id"] for e in document["errors"]):
@@ -62,6 +62,10 @@ async def enrich_store(registry, config, document, item):
         item["name"] = result.data.get("name") or item["name"]
         item["app_type"] = result.data.get("type")
     index_app(document, item["appid"], item["name"], result.source)
+    if result.state == "ok":
+        for related_appid in result.data.get("dlc", []):
+            if valid_appid(related_appid):
+                index_app(document, related_appid, source="get_app_details:dlc")
 
 
 async def run(registry, config, document, runtime, *, query=None, appid=None):
@@ -86,6 +90,9 @@ async def run(registry, config, document, runtime, *, query=None, appid=None):
     item = record(appid, config.steamid, name)
     document["data"]["items"].append(item)
     index_app(document, appid, name)
+    if runtime:
+        runtime.total = 1
+        runtime.task(f"app-{appid}", "running", appid=appid)
     await enrich_store(registry, config, document, item)
     if config.steamid:
         from scripts.library import collect_accounts, merge_ownership, merge_playtime, finish_status
@@ -100,3 +107,5 @@ async def run(registry, config, document, runtime, *, query=None, appid=None):
         document["coverage"]["account"] = dict(state="not_requested", complete=None,
             note="STEAM_ID not configured; public store scope only, ownership remains null")
         document["status"] = "ok" if item["store"]["state"] == "ok" else "partial"
+    if runtime:
+        runtime.task(f"app-{appid}", "failed" if document["status"] in {"partial", "failed"} else "success", appid=appid)

@@ -4,12 +4,16 @@ import time
 
 from error_handler import Failure
 from Ports.request_executor import Result
+from Ports.get_shared_library_apps import KNOWN_EXCLUDED_REASONS
 from scripts.game import add_result, block, record, enrich_store
 from scripts.persistence import index_app
 
 
 async def collect_accounts(registry, config, document, runtime, *, player_data=True):
-    collections = {}
+    collections = {
+        "owned": Result("unavailable", source="get_owned_games"),
+        "family": Result("unavailable", source="get_shared_library_apps"),
+    }
     started = time.monotonic()
     if runtime:
         runtime.event("phase_started", phase="collections")
@@ -17,6 +21,18 @@ async def collect_accounts(registry, config, document, runtime, *, player_data=T
         result = await registry.call(name, params)
         collections[key] = result
         add_result(document, key, result, request_scope=result.data.get("request_scope"))
+        # Publish each completed collection immediately so cancellation preserves its IDs.
+        if document["meta"]["feature"] == "library":
+            existing = {item["appid"]: item for item in document["data"]["items"]}
+            for row in result.data.get("items", []):
+                if row["appid"] not in existing:
+                    item = record(row["appid"], config.steamid, row.get("name"))
+                    document["data"]["items"].append(item)
+                    existing[row["appid"]] = item
+                    index_app(document, row["appid"], row.get("name"), result.source)
+            for item in existing.values():
+                merge_ownership(item, collections, config.steamid)
+                merge_playtime(item, collections, config.steamid)
         if runtime:
             runtime.event("collection_loaded", api=name, collection=key, count=len(result.data.get("items", [])), state=result.state)
         return result
@@ -69,8 +85,7 @@ def merge_ownership(item, collections, subject):
             if subject in owners:
                 owned_by_self = True
         if other is True and type(reason) is int:
-            # Only explicit zero is interpreted as no exclusion. Unknown enums stay unknown.
-            available = True if reason == 0 else None
+            available = True if reason == 0 else False if reason in KNOWN_EXCLUDED_REASONS else None
     item["ownership"] = block("ok" if all(v is not None for v in (owned_by_self, other, available)) else "partial",
         source=[own.source, family.source], fetched_at={"owned": own.fetched_at, "family": family.fetched_at},
         owned_by_self=owned_by_self, owned_by_other_family_members=other, available_via_family=available,
@@ -186,6 +201,10 @@ async def enrich_items(registry, config, document, runtime, *, player_data):
 
 def finish_status(document, primary_ok):
     incomplete = any(c.get("state") in {"unavailable", "partial"} or c.get("complete") is False for c in document["coverage"].values())
+    incomplete = incomplete or any(
+        item[name]["state"] in {"partial", "unavailable"}
+        for item in document["data"]["items"]
+        for name in ("ownership", "store", "achievements", "stats"))
     document["status"] = "failed" if not primary_ok else "partial" if incomplete else "ok"
     items = document["data"]["items"]
     times = [item["playtime"]["total_minutes"] for item in items]
@@ -202,6 +221,7 @@ async def run(registry, config, document, runtime):
     candidates = {}
     for key in ("family", "played_family", "recent", "owned"):
         candidates.update(rows_by_id(collections.get(key)))
+    document["data"]["items"].clear()
     for appid in sorted(candidates):
         row = candidates[appid]
         item = record(appid, config.steamid, row.get("name"))
@@ -210,4 +230,4 @@ async def run(registry, config, document, runtime):
         document["data"]["items"].append(item)
         index_app(document, appid, item["name"], "library collections")
     await enrich_items(registry, config, document, runtime, player_data=True)
-    finish_status(document, bool(candidates) or collections["owned"].state == "ok" or collections["family"].state in {"ok", "not_applicable"})
+    finish_status(document, bool(candidates) or collections["owned"].state == "ok" or collections["family"].state == "ok")

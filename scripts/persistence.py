@@ -37,7 +37,7 @@ def index_app(result, appid, name=None, source=None):
             ids.sort()
 
 
-def save(result, path, redact=lambda x: x):
+def save(result, path, redact=lambda x: x, *, amend_current=False):
     path = Path(path)
     temporary = None
     try:
@@ -49,7 +49,14 @@ def save(result, path, redact=lambda x: x):
             file.flush()
             os.fsync(file.fileno())
         # link is atomic and refuses to clobber an existing run, unlike replace.
-        os.link(temporary, path)
+        if amend_current:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing.get("meta", {}).get("run_id") != result.get("meta", {}).get("run_id"):
+                raise ValueError("Refusing to amend a different run")
+            os.replace(temporary, path)
+            temporary = None
+        else:
+            os.link(temporary, path)
         return path
     except (OSError, ValueError, TypeError) as exc:
         raise Failure("OUTPUT_WRITE_FAILED", "Cannot save business JSON", source="persistence", scope="run", exception_type=type(exc).__name__) from None

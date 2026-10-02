@@ -61,7 +61,7 @@ class FakeClock:
         self.waits.append(amount)
 
 
-@pytest.mark.parametrize("kind", ["429", "503", "timeout"])
+@pytest.mark.parametrize("kind", ["429", "429-no-header", "503", "timeout"])
 def test_finite_retries(kind):
     async def check():
         calls = 0
@@ -72,7 +72,7 @@ def test_finite_retries(kind):
             calls += 1
             if kind == "timeout":
                 raise httpx.ReadTimeout("synthetic timeout")
-            return httpx.Response(int(kind), headers={"Retry-After": "2"} if kind == "429" else {})
+            return httpx.Response(int(kind.split("-")[0]), headers={"Retry-After": "2"} if kind == "429" else {})
         ex = Executor(replace(Config(), webapi_rps=100), lambda event, **kw: events.append((event, kw)), transport=httpx.MockTransport(transport), clock=clock, sleep=clock.sleep, jitter=lambda: 0)
         result = await ex.execute(SPEC, lambda b: b)
         assert calls == result.attempts == 3
