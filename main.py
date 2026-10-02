@@ -7,7 +7,7 @@ from config import load_config
 from error_handler import Failure
 from Ports.registry import build_registry
 from Ports.request_executor import Executor
-from scripts import game
+from scripts import game, library, wishlist
 from scripts.persistence import new_run, save
 from scripts.runtime_debug import Runtime, utcnow
 
@@ -18,6 +18,8 @@ def parser():
     target = sub.add_parser("game", help="按名称、AppID 或官方 app URL 查询")
     target.add_argument("query", nargs="?")
     target.add_argument("--appid", type=int)
+    sub.add_parser("library", help="导出本人库及家庭候选")
+    sub.add_parser("wishlist", help="导出愿望单")
     return cli
 
 
@@ -27,7 +29,10 @@ async def execute(args, config):
     executor = Executor(config, runtime.event)
     registry = build_registry(executor)
     try:
-        await game.run(registry, config, document, runtime, query=args.query, appid=args.appid)
+        if args.feature == "game":
+            await game.run(registry, config, document, runtime, query=args.query, appid=args.appid)
+        else:
+            await {"library": library.run, "wishlist": wishlist.run}[args.feature](registry, config, document, runtime)
     except Failure as exc:
         document["errors"].append(exc.info)
         document["status"] = "failed"

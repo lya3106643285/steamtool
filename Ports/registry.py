@@ -101,4 +101,7 @@ def build_registry(executor):
     registry.register(Tool("resolve_vanity_url", resolve_vanity_url.call, "user_key", required=("vanity",)))
     registry.register(Tool("get_family_group_for_user", get_family_group_for_user.call, "session_token", capability_status="experimental", required=("steamid",)))
     registry.register(Tool("get_shared_library_apps", get_shared_library_apps.call, "session_token", capability_status="experimental", required=("steamid", "family_groupid", "language")))
+    from Ports import get_wishlist, get_wishlist_item_count
+    registry.register(Tool("get_wishlist", get_wishlist.call, capability_status="experimental", required=("steamid",)))
+    registry.register(Tool("get_wishlist_item_count", get_wishlist_item_count.call, capability_status="experimental", required=("steamid",)))
     return registry

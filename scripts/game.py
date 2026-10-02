@@ -87,6 +87,16 @@ async def run(registry, config, document, runtime, *, query=None, appid=None):
     document["data"]["items"].append(item)
     index_app(document, appid, name)
     await enrich_store(registry, config, document, item)
-    document["coverage"]["account"] = dict(state="not_requested", complete=None,
-        note="Account enrichment is introduced in stage 4; no ownership assertion is made")
-    document["status"] = "ok" if item["store"]["state"] == "ok" else "partial"
+    if config.steamid:
+        from scripts.library import collect_accounts, merge_ownership, merge_playtime, finish_status
+        from scripts.wishlist import collect_wishlist, merge_wish
+        collections = await collect_accounts(registry, config, document, runtime)
+        merge_ownership(item, collections, config.steamid)
+        merge_playtime(item, collections, config.steamid)
+        wishes, complete = await collect_wishlist(registry, config, document)
+        merge_wish(item, wishes, complete)
+        finish_status(document, True)
+    else:
+        document["coverage"]["account"] = dict(state="not_requested", complete=None,
+            note="STEAM_ID not configured; public store scope only, ownership remains null")
+        document["status"] = "ok" if item["store"]["state"] == "ok" else "partial"
