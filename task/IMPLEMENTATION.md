@@ -19,3 +19,21 @@
 `.venv/bin/python -m pytest -q`：11 passed。
 `./start game --appid 292030`：退出 0，匿名 appdetails 返回 HTTP 200 且通过身份/结构验证，业务 JSON status=ok。时间 2026-10-02T16:12Z。
 此时仅验证公开商店路径，不代表本人库、家庭或账号接口成功。认证材料不会发送到商店。
+
+## 阶段 3
+
+实现本人库（自有/已借玩两种参数）、近期记录、schema、本人玩家成就/统计、用户资料、vanity，以及家庭组与共享清单适配器。
+`.venv/bin/python -m pytest -q`：13 passed。新增测试检查最终 HTTP 认证头/Service input_json 编码、零时长、成就失败和空定义区分、家庭缺凭据/身份不符/未知排除值。
+无 `.env`，未进行私人账号 live 请求；本人 Key 和家庭 token 的验收仍待用户本地配置。
+家庭 token 本地解析只用作目标身份预检；必须随后由 Steam 接受认证请求，并在有家庭时返回包含本人的成员清单。未宣称本地校验 JWT 签名。不透明/无有效身份声明的 token 保守拒绝绑定。
+家庭清单完整性始终为 false（无已验证分页保证）；达到 max_apps=10000 时额外标记可能截断。不导出主体/单位不明的 rt_playtime。
+
+### 协议复核
+
+- [Valve IPlayerService](https://partner.steamgames.com/doc/webapi/IPlayerService)：使用 input_json；认证单独发送。
+- [Valve Web API authentication](https://partner.steamgames.com/doc/webapi_overview/auth)：个人 Key 使用 x-webapi-key。
+- [Valve ISteamUserStats](https://partner.steamgames.com/doc/webapi/ISteamUserStats)：单 AppID、指定目标玩家。
+- [SteamTracking FamilyGroups](https://github.com/SteamTracking/Protobufs/blob/f5b0600750b2d5634c78f654845b6d5954f700db/webui/service_familygroups.proto)：复核只读方法、身份、拥有者、max_apps 字段；内部接口仍实验性。通过 GitHub commits API 获取该文件最新提交 f5b0600750b2d5634c78f654845b6d5954f700db。
+- 愿望单协议已从同仓库 webui/service_wishlist.proto 读取，后续使用 steamid、items、appid/priority/date_added 和 count；不调用任何写入方法。
+
+这些协议资料不构成真实账号联调证据。

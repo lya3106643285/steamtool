@@ -89,4 +89,16 @@ def build_registry(executor):
                            required=("appid", "language", "country")))
     registry.register(Tool("search_games", search_games.call, rate_scope="store.steampowered.com",
                            required=("query", "language", "country")))
+    from Ports import (get_owned_games, get_recently_played_games, get_schema_for_game,
+                       get_player_achievements, get_user_stats_for_game, get_player_summaries,
+                       resolve_vanity_url, get_family_group_for_user, get_shared_library_apps)
+    registry.register(Tool("get_owned_games", get_owned_games.call, "user_key", required=("steamid",), optional=("include_family_licenses",)))
+    registry.register(Tool("get_recently_played_games", get_recently_played_games.call, "user_key", required=("steamid",)))
+    registry.register(Tool("get_schema_for_game", get_schema_for_game.call, "user_key", required=("appid", "language")))
+    registry.register(Tool("get_player_achievements", get_player_achievements.call, "user_key", required=("appid", "steamid", "language")))
+    registry.register(Tool("get_user_stats_for_game", get_user_stats_for_game.call, "user_key", required=("appid", "steamid")))
+    registry.register(Tool("get_player_summaries", get_player_summaries.call, "user_key", required=("steamid",)))
+    registry.register(Tool("resolve_vanity_url", resolve_vanity_url.call, "user_key", required=("vanity",)))
+    registry.register(Tool("get_family_group_for_user", get_family_group_for_user.call, "session_token", capability_status="experimental", required=("steamid",)))
+    registry.register(Tool("get_shared_library_apps", get_shared_library_apps.call, "session_token", capability_status="experimental", required=("steamid", "family_groupid", "language")))
     return registry
