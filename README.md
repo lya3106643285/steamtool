@@ -2,6 +2,47 @@
 
 一个 Python 3.11+ / WSL 的只读命令行工具包：导出愿望单、本人游戏库与家庭候选，或查询单款游戏。输出业务 JSON 和结构化 JSONL 日志，不启动服务，不需要域名、Docker 或数据库。
 
+## 已实现功能与对应命令
+
+当前版本为 **1.1.0**。主命令是 `steamtool`，`teamtool` 和 `Steamtool` 是相同功能的别名；下面的示例都可以替换为这两个名字。
+
+| 已实现功能 | 对应命令 | 使用条件与结果 |
+| --- | --- | --- |
+| 交互菜单 | `steamtool` | 在交互终端选择愿望单、游戏库、游戏查询或诊断；输入 `0` 退出 |
+| 愿望单导出 | `steamtool wishlist` | 需要 `STEAM_ID`；读取可访问的愿望单、优先级、添加时间，补充商店详情及可取得的持有关系 |
+| 本人库与游玩记录 | `steamtool library` | 本人库需要 `STEAM_ID` 和 `STEAM_API_KEY`；合并本人库、近期记录和借玩补充，导出时长 |
+| 家庭共享候选与资格 | `steamtool library` | 额外需要 `STEAM_FAMILY_ACCESS_TOKEN`；区分本人持有、家人持有与本人可共享，家庭能力为实验性 |
+| 逐游戏成就和统计 | `steamtool library` | 需要 `STEAM_ID` 和 `STEAM_API_KEY`；读取可取得的成就定义、本人解锁记录和统计，缺失信息保留未知 |
+| 按游戏名称搜索、查询 | `steamtool game "Portal 2"` | 查询公开商店；存在歧义时导出候选，随后指定 AppID |
+| 按 AppID 查询 | `steamtool game --appid 620` | 查询公开详情、价格、平台、发行信息与 DLC ID；配置账号后补充相关持有、时长和愿望单关系 |
+| 按商店链接查询 | `steamtool game "https://store.steampowered.com/app/620/"` | 接受官方 `/app/` 链接；不支持 `/sub/`、`/bundle/` |
+| 配置与网络诊断 | `steamtool doctor` | 检查配置、输出目录和公开接口；凭据齐全时增加本人资料及家庭组探测 |
+| 定位配置文件 | `steamtool config path` | 仅显示当前 `.env` 路径，不显示凭据 |
+| 创建空白配置 | `steamtool config init` | 创建权限为 `600` 的配置模板，已有配置时拒绝覆盖 |
+| 导入已有配置 | `steamtool config import /路径/到/.env` | 私密复制已有 `.env`，保留源文件，不覆盖目标 |
+| 停止运行任务 | `steamtool stop` 或当前终端 `Ctrl+C` | 尽力保存已完成部分；`stop` 针对使用同一配置目录的实例 |
+| 查看帮助和版本 | `steamtool --help` / `steamtool --version` | 无需凭据，也不会发起 Steam 请求 |
+
+每次查询或导出都会生成业务 JSON 和运行日志，支持并发、限速、有限重试、脱敏和取消后的部分结果保存。成就、统计和家庭功能已经实现，但真实账号验收范围仍以[家庭能力与真实验证边界](#家庭能力与真实验证边界)为准。当前没有独立的 `family`、`achievements`、`all` 子命令，也没有自动登录或获取 token 的功能。
+
+## 快速上手
+
+已安装并配置好 PATH 后，新开终端即可在任意目录运行：
+
+```bash
+steamtool --version
+steamtool --help
+steamtool config path              # 找到安装版正在使用的配置
+steamtool doctor                   # 先检查配置及接口可用性
+steamtool game --appid 292030      # 查询指定游戏
+steamtool wishlist                # 导出愿望单
+steamtool library                 # 导出游戏库与可取得的补充信息
+```
+
+尚未安装时，按下一节完成安装。尚未配置时，先初始化空白配置或导入已有 `.env`；已有配置无需重新初始化。安装版默认读取 `~/.steamtool/.env`，在项目目录修改原始 `.env` 不会同步改变已导入的副本，应编辑 `steamtool config path` 显示的文件。
+
+普通查询命令完成后，终端会打印本次业务 JSON 的完整路径。默认结果在 `~/.steamtool/Outputs`；可以用文件编辑器打开对应 `.json`，并通过同名 `.runtime.jsonl` 查看运行记录。`doctor` 会额外将诊断 JSON 打印到终端。使用自定义 `STEAMTOOL_HOME` 或 `OUTPUT_DIR` 时，以实际打印的路径为准。
+
 ## 安装与配置
 
 steamtool 是可安装的 Python CLI 包，发行包名称为 `steamtool-cli`，命令名称为 `steamtool`。使用 Conda 管理 Python 和依赖，在本项目目录首次安装：
@@ -22,7 +63,6 @@ python -m pip install -r requirements-dev.txt
 ```
 
 `environment.yml` 固定 Python 3.12 并安装本地包；运行依赖固定在 `requirements.txt`。激活安装了本包的 Conda 环境后，任何目录都可调用 `steamtool`。也可直接调用环境的 `bin/steamtool`。支持 Python 3.11+，当前验证环境为 Python 3.12.14 / Conda 26.1.1。
-
 
 若希望打开终端即可调用，安装后将入口加入用户 PATH（在安装本包的 Conda 环境中执行一次）：
 
@@ -59,7 +99,9 @@ steamtool config path
 
 环境变量优先于 `.env`，再使用默认值。`.env` 由 Python 读取，不执行 shell 内容。Key/token 不接受 CLI 参数。无需凭据即可搜索商店和读取单款公开详情；未配置 SteamID 时账号部分为 `not_requested`，拥有关系仍为 `null`。
 
-## 运行
+## 使用说明
+
+### 常用命令
 
 ```bash
 steamtool                         # 交互菜单，选择任务后继续菜单
@@ -72,6 +114,51 @@ steamtool doctor                  # stdout 输出诊断 JSON，日志走 stderr
 steamtool --help
 steamtool stop
 ```
+
+### 游戏查询
+
+以下四种写法都受支持：
+
+```bash
+steamtool game "Portal 2"
+steamtool game 620
+steamtool game --appid 620
+steamtool game "https://store.steampowered.com/app/620/"
+```
+
+名称包含空格时加引号。名称查询遇到同名、模糊匹配或未选中结果时，会生成 `status=needs_selection` 的 JSON；查看 `data.resolution.candidates` 中的 AppID，再执行 `game --appid`。单款查询不执行全库逐游戏补齐，也不补齐该游戏的个人成就和统计。
+
+### 愿望单与游戏库导出
+
+```bash
+steamtool wishlist
+steamtool library
+```
+
+愿望单以 AppID 保留条目，即使详情不可读或游戏下架，也不会静默丢弃。`library` 在相关清单的基础上逐游戏补充商店详情、成就和统计；游戏数量较多时耗时会增加，可在另一个终端执行 `steamtool stop`，或在当前终端按 `Ctrl+C`。
+
+缺少家庭 token 时仍可读取有权限的本人库，家庭相关字段会标记缺口。账号隐私、权限或接口响应缺失时，以 JSON 中的 `coverage`、各数据块状态和 `errors` 判断可用范围；`partial` 退出码为 `2`，已有结果仍可使用。
+
+### 配置维护、诊断与停止
+
+```bash
+steamtool config path                    # 显示当前配置路径
+steamtool config init                    # 仅用于尚无配置的情况
+steamtool config import /路径/到/.env    # 与 init 二选一，不覆盖已有配置
+steamtool doctor                         # 少量只读网络诊断
+steamtool stop                           # 停止同一配置目录的任务
+steamtool game --help                    # 查看单款查询参数
+steamtool config --help                  # 查看配置子命令
+```
+
+更新 Key 或家庭 token 时，编辑当前配置文件后重新执行任务。需要管理另一份配置时，指定绝对路径；开始任务和停止任务需使用相同目录：
+
+```bash
+STEAMTOOL_HOME=/绝对路径/到/另一份配置 steamtool doctor
+STEAMTOOL_HOME=/绝对路径/到/另一份配置 steamtool stop
+```
+
+### 安装包维护与源码兼容入口
 
 安装和卸载由 pip 管理；`steamtool stop` 仅停止任务。更新包可重新运行 `python -m pip install .`。卸载命令为 `python -m pip uninstall steamtool-cli`，用户配置、结果和日志会保留。若创建了用户 PATH 中的软链接，可删除这些已确认属于本工具的链接。当前提供本地源码和 wheel 安装，尚未发布到 PyPI。
 
