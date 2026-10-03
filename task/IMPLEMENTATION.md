@@ -157,3 +157,17 @@ SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未
 验证：新命名环境中完整离线测试 **74 passed in 19.11s**；新增命名环境优先于旧项目/无关活动环境、无需激活即可选择命名环境的测试。实际激活后 Python sys.prefix 为命名环境目录，pip check 无依赖冲突；在 /tmp 直接运行 steamtool/teamtool --version、源码 start --help 及 Bash 语法检查均通过。本轮没有新增 Steam 网络请求。
 
 环境克隆参考 [Conda 官方环境管理文档](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#cloning-an-environment)。原有 README 表格排版和任务书移动继续保留为未提交工作区改动。
+
+## 2026-10-04：完整游戏库联网执行与清单完整性复查
+
+在用户明确允许联网后执行已安装 steamtool library，使用已有本地三项配置，原并发/速率不变。此前取消运行的文件保留；本轮独立 run_id，运行 840.60 秒后自然结束，退出码 2、status=partial，导出 419 个不重复 AppID。实际发送 1668 次请求，无重试/429；没有因测试耗时而取消任务。
+
+执行后通过同一 Executor 和只读接口进行小规模独立复查。本人接口 125 条，game_count=125，响应内数量一致；借玩补充 137 条，game_count=125，比本人清单多 12，因此不证明其完整性。近期 10 条、家庭候选 419 条；所有源集合并集与导出集合完全相同，缺失/额外 AppID 均为 0。
+
+家庭 max_apps=1000/10000 两次均返回相同 419 个 AppID，未观察到截断，但实际响应只有 apps/owner_steamid，没有全量计数。按 [家庭请求/响应协议](https://raw.githubusercontent.com/SteamTracking/Protobufs/master/webui/service_familygroups.proto)，该接口未提供可供本次核对的总量/分页字段，不据此承诺 Steam 客户端全量一致。请求包含 include_own/include_excluded/include_non_games，419 是候选条目数，不是纯游戏或可共享游戏数。[Valve GetOwnedGames 文档](https://partner.steamgames.com/doc/webapi/IPlayerService#GetOwnedGames) 也限定其为可见的本人游戏响应，不将 125 与其他查询口径直接等同。
+
+最终商店详情 277 成功/142 不可用，时长 137 有记录/282 不可用，成就 213 完整/13 不适用/1 部分/192 不可用，统计 25 成功/394 不可用。错误为 DATA_UNAVAILABLE 920 与 ACCESS_DENIED 1；HTTP 400 385、403 1，另有缺成就定义、商店详情不可提供、没有统计列表等响应内缺失。保留未知值，没有凭状态猜测隐私设置或生成不存在的数据。
+
+真实接口证据提供四类样本：本人持有且有本人时长 79、本人不持有但有借玩时长 12、本人不持有且可共享但没有本人时长记录 83、本人不持有且被排除 7。无时长证据不等于从未玩过；人工 Steam 客户端对照仍未完成。
+
+验证业务 JSON 中全部记录进入 id_map，个人指标主体一致，Key/token 未写入输出；结果和额外审计报告留在 ~/.steamtool/Outputs，不提交私人 ID/名称/响应。README 和验收矩阵更新真实验证范围，仅提交安全汇总及说明，不修改业务实现。原有用户 README 排版和任务书移动继续保留。
