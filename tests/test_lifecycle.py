@@ -31,7 +31,8 @@ def project(tmp_path):
         shutil.copy2(ROOT / name, project / name)
     for name in ('Ports', 'scripts'):
         shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__'))
-    (project / '.venv').symlink_to(ROOT / '.venv', target_is_directory=True)
+    # Use the interpreter running the suite; tests have no fixed developer env path.
+    (project / '.conda').symlink_to(Path(sys.prefix), target_is_directory=True)
     support = tmp_path / 'support'
     support.mkdir()
     (support / 'sitecustomize.py').write_text('''
@@ -55,7 +56,7 @@ class Client(original):
         super().__init__(*args, **kwargs)
 httpx.AsyncClient = Client
 ''')
-    env = {k: v for k, v in os.environ.items() if not k.startswith('STEAM_') and k != 'OUTPUT_DIR'}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('STEAM_') and k not in {'OUTPUT_DIR', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV'}}
     env.update(PYTHONPATH=str(support), STEAM_STORE_RPS='1000', STEAM_WEBAPI_RPS='1000', STEAM_STOP_GRACE_SECONDS='.05', STEAM_PROGRESS_INTERVAL_SECONDS='.05')
     return project, env
 
@@ -146,7 +147,7 @@ def test_stale_or_reused_pid_is_not_signaled(tmp_path, monkeypatch):
     info['start_ticks'] = 'wrong'
     (directory / 'instance.json').write_text(json.dumps(info))
     signaled = []
-    monkeypatch.setattr(signal, 'pidfd_send_signal', lambda *a: signaled.append(a))
+    monkeypatch.setattr(main, 'send_pidfd_signal', lambda *a: signaled.append(a))
     with (directory / 'instance.lock').open('w+') as lock:
         lock.write('fake')
         lock.flush()
@@ -154,6 +155,17 @@ def test_stale_or_reused_pid_is_not_signaled(tmp_path, monkeypatch):
         assert main.stop_instance(tmp_path, wait_seconds=.1) == 1
     assert signaled == []
     assert main.stop_instance(tmp_path) == 0
+
+
+def test_pidfd_works_when_python_wrappers_are_absent(monkeypatch):
+    monkeypatch.delattr(os, 'pidfd_open', raising=False)
+    monkeypatch.delattr(signal, 'pidfd_send_signal', raising=False)
+    descriptor = main.open_pidfd(os.getpid())
+    try:
+        # Signal 0 checks our own live process; it does not terminate it.
+        main.send_pidfd_signal(descriptor, 0)
+    finally:
+        os.close(descriptor)
 
 
 def test_menu_multiple_runs_and_exit(project):

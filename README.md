@@ -4,16 +4,18 @@
 
 ## 安装与配置
 
-在本项目目录运行（已验证 Python 3.12.3）：
+使用 Conda 管理 Python 和项目依赖，在本项目目录运行（本次验证 Python 3.12.14 / Conda 26.1.1）：
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+conda env create --prefix ./.conda --file environment.yml
+conda activate ./.conda
 # 需要运行离线测试时：
-.venv/bin/python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 ```
 
-若系统缺少 venv，请先安装对应 Python 的 venv 支持。所有项目依赖安装到 `.venv`；入口不自动安装或升级。
+先安装 WSL/Linux 版 Miniconda 或 Miniforge。`environment.yml` 固定 Python 3.12，运行依赖版本保留在 `requirements.txt`。环境位于项目 `.conda`；更新环境可执行 `conda env update --prefix ./.conda --file environment.yml`。入口直接执行 Conda 环境中的 Python，不必每次激活，也不自动安装或升级。
+
+`./start` 和 `./stop` 按以下顺序选择环境：`STEAM_CONDA_PREFIX` 显式指定的路径 → 项目 `.conda` → 已激活环境的 `CONDA_PREFIX`。使用其他 Conda 环境时，可以设置 `export STEAM_CONDA_PREFIX=/绝对路径/到/环境`；启动前检查 Conda 元数据、Python 版本及依赖。
 
 仅当 `.env` 尚不存在时，从 `.env.example` 复制一份，在本地编辑并限制访问权限。**不要提交 `.env`，也不要把 Key、token、Cookie 贴到聊天或测试报告中。**
 
@@ -90,7 +92,7 @@ if [ ! -e .env ]; then cp .env.example .env; chmod 600 .env; fi
 
 原始协议中的 `exclude_reason=0` 解释为无排除，已知排除值解释为不可共享；未定义值保留原值并保持资格未知。资格不代表当前有空闲副本。
 
-已真实验证匿名商店详情和搜索。**本人库、私人愿望单及家庭接口均未进行真实账号联调**；自动测试使用合成响应。完整家庭 live 验收仍待本地配置凭据后进行，不能用本项目的离线通过结果代替。
+已真实验证匿名商店详情和搜索、本人资料、本人库与近期记录清单、家庭组与共享候选清单。**私人愿望单、逐游戏成就/统计、家庭四类样本及完整性仍未完成真实验收**；自动测试使用合成响应。`include_family_licenses` 补充清单在本次实测中未能确认完整性，家庭候选也保留 `complete=false`，不宣称完整家庭库。
 
 ## 请求控制与停止
 
@@ -109,7 +111,7 @@ if [ ! -e .env ]; then cp .env.example .env; chmod 600 .env; fi
 
 完整变量名见 `.env.example`。这些值是保守工程默认值，不是 Valve 公布的限额。首次发送前的排队不消耗逻辑请求预算；后续排队、重试和退避计入预算。429 对对应域名实施共享冷却，兼容秒数和日期 Retry-After；服务端等待不被本地上限缩短。等待过长会结束本次请求但保留冷却。认证、证书及结构错误不盲目重试，TLS 始终校验，不自动跟随重定向。
 
-Python 在整个会话持有 `.runtime/instance.lock` 的文件锁。`stop` 检查锁、PID、启动标识、boot ID、UID、绝对项目路径及命令行，使用 Linux pidfd 避免 PID 重用竞态；不支持 pidfd 或身份无法确认时拒绝发送信号。不会按进程名批量终止 Python。
+Python 在整个会话持有 `.runtime/instance.lock` 的文件锁。`stop` 检查锁、PID、启动标识、boot ID、UID、绝对项目路径及命令行，使用 Linux pidfd 避免 PID 重用竞态；Conda Python 未提供 pidfd 包装时调用系统 libc 的同名接口。不支持 pidfd 或身份无法确认时拒绝发送信号。不会按进程名批量终止 Python。
 
 SIGINT/SIGTERM 或 `stop` 会停止新派发、唤醒限速与重试等待，在宽限内收集结果后取消剩余任务，保存部分 JSON、关闭连接并释放锁。重复 stop 无害，默认不强杀。stop 最多等待 15 秒确认收尾；若自行设置超过此值的宽限，stop 可能先报告未确认，但不会强杀。
 
@@ -134,9 +136,10 @@ SIGINT/SIGTERM 或 `stop` 会停止新派发、唤醒限速与重试等待，在
 ## 测试与开发
 
 ```bash
-.venv/bin/python -m pytest -q
-.venv/bin/python -m compileall -q main.py config.py error_handler.py Ports scripts
-.venv/bin/python -m pip check
+conda activate ./.conda
+python -m pytest -q
+python -m compileall -q main.py config.py error_handler.py Ports scripts
+python -m pip check
 bash -n start stop
 ```
 

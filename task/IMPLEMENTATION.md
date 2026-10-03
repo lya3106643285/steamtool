@@ -99,3 +99,27 @@ SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未
 | start/stop、菜单、doctor | 完成 | 实际子进程测试通过 | 本机命令和公开探测成功 |
 
 私人愿望单、本人库、include_family_licenses、家庭四类样本和完整性 live 验收仍待本地凭据。未进行自动登录、Key/token 获取、写账号操作、远端创建、推送或发布。
+
+## 2026-10-04：Conda 环境迁移与本地凭据联调
+
+按用户后续要求，由 venv 改为 Conda。新增 `environment.yml`（Python 3.12、pip、固定运行依赖），在本项目 `.conda` 创建环境；本次实际 Python 3.12.14 / Conda 26.1.1。依赖及下载缓存加入 Git 忽略。
+
+`start` 优先采用 STEAM_CONDA_PREFIX，其次项目 `.conda`，最后已激活的 CONDA_PREFIX；直接 exec 选定环境的 Python，保留进程身份和信号传递。旧 `.venv` 保留在本机，但入口不再选择它。缺少环境、版本或依赖时显示 Conda 安装提示。生命周期测试改用运行测试的解释器环境，不依赖开发机器的 `.venv` 路径。
+
+该 Conda Python 构建未提供 os.pidfd_open / signal.pidfd_send_signal。增加调用系统 libc 的 pidfd_open / pidfd_send_signal 兼容路径，继续先固定进程身份再校验和发信号；无 pidfd 支持时仍拒绝发送。不改成裸 PID kill。
+
+用户原先将 SteamID/Key 填在 Config 默认值；配置加载函数实际读取 `.env`/环境变量，因此将值迁移到未提交的 `.env` 并清空源代码默认值。保留已有 `.env` 非空值及用户随后添加的家庭 token，文件权限 0600。检查时曾意外显示未提交代码中的 Key，已告知用户建议更换；未将该 Key 或 token 提交到 Git。
+
+验证结果：
+
+- `.conda/bin/python -m pytest -q`：**66 passed in 2.79s**。包括 Conda 入口选择/参数安全传递、缺环境提示，以及实际子进程停止/取消和 pidfd libc 兼容测试。
+- `.conda/bin/python -m compileall -q main.py config.py error_handler.py Ports scripts`、`bash -n start stop`：退出 0。
+- `.conda/bin/python -m pip check`：No broken requirements found。
+- `./start --help`：Conda 下退出 0。
+- `./start doctor`：退出 0、status=ok；公开商店、本人资料、家庭组均 state=ok，没有最终错误。三项凭据均已配置；本地 token 主体与目标匹配，Steam 接受了实际家庭组认证请求。
+- 低频读取 GetOwnedGames 两种模式、GetRecentlyPlayedGames、GetFamilyGroupForUser 和 GetSharedLibraryApps：均 state=ok，无最终错误。本人库与近期清单在声明响应范围内数量一致；借玩补充数量一致性未确认，complete=false；家庭候选继续 complete=false。未逐游戏抓取整个库的详情或成就，不将清单请求成功当作完整家庭验收。
+- `.env` 已被 Git 忽略，当前源代码默认凭据为空；真实响应及日志保存在本地 Outputs，没有提交账号 ID、token 或私人库清单。
+
+使用方式与环境路径依据 [Conda 官方环境管理文档](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html)。私人愿望单、逐游戏成就/统计、家庭四类样本与完整性仍需后续验收。保留此前阶段记录作为历史证据。
+
+本次提交仅包含迁移与验证改动；用户原有 README 排版调整及任务书向 task 的移动保留在工作区。

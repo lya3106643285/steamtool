@@ -1,6 +1,7 @@
 """CLI, single-instance identity, cancellation, diagnostics and result lifecycle."""
 import argparse
 import asyncio
+import ctypes
 import fcntl
 import json
 import os
@@ -74,6 +75,30 @@ class InstanceLock:
                 self.file = None
 
 
+def open_pidfd(pid):
+    if hasattr(os, 'pidfd_open'):
+        return os.pidfd_open(pid)
+    # Some Conda Python builds omit the wrapper despite kernel/libc support.
+    native = ctypes.CDLL(None, use_errno=True).pidfd_open
+    native.argtypes = [ctypes.c_int, ctypes.c_uint]
+    native.restype = ctypes.c_int
+    descriptor = native(pid, 0)
+    if descriptor < 0:
+        raise OSError(ctypes.get_errno(), 'pidfd_open failed')
+    return descriptor
+
+
+def send_pidfd_signal(descriptor, sig):
+    if hasattr(signal, 'pidfd_send_signal'):
+        signal.pidfd_send_signal(descriptor, sig)
+        return
+    native = ctypes.CDLL(None, use_errno=True).pidfd_send_signal
+    native.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
+    native.restype = ctypes.c_int
+    if native(descriptor, sig, None, 0) < 0:
+        raise OSError(ctypes.get_errno(), 'pidfd_send_signal failed')
+
+
 def stop_instance(root=ROOT, *, wait_seconds=15):
     root = root.resolve()
     lock_path, metadata = root / '.runtime/instance.lock', root / '.runtime/instance.json'
@@ -95,7 +120,7 @@ def stop_instance(root=ROOT, *, wait_seconds=15):
             if type(pid) is not int or pid <= 1:
                 raise ValueError('invalid PID')
             # A pidfd pins the kernel process identity before /proc validation and signaling.
-            pidfd = os.pidfd_open(pid)
+            pidfd = open_pidfd(pid)
             current = process_identity(pid)
             probe.seek(0)
             if (info.get('project') != str(root) or info.get('instance_id') != probe.read().strip()
@@ -104,7 +129,7 @@ def stop_instance(root=ROOT, *, wait_seconds=15):
                     or str(root / 'main.py') not in current['argv']
                     or current['argv'] != info.get('argv')):
                 raise ValueError('identity mismatch')
-            signal.pidfd_send_signal(pidfd, signal.SIGTERM)
+            send_pidfd_signal(pidfd, signal.SIGTERM)
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             print('拒绝发送信号：无法确认锁、PID 启动身份与项目。请检查 .runtime。', file=sys.stderr)
             return 1

@@ -4,6 +4,8 @@
 Outputs/
 .runtime/
 .venv/
+.conda/
+.conda-pkgs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
