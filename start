@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export STEAMTOOL_HOME="${STEAMTOOL_HOME:-$PROJECT_ROOT}"
 if [[ -n "${STEAM_CONDA_PREFIX:-}" ]]; then
   PROJECT_ENV="$STEAM_CONDA_PREFIX"
 elif [[ -d "$PROJECT_ROOT/.conda" ]]; then

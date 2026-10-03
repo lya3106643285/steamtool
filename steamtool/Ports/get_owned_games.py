@@ -1,7 +1,7 @@
 """Own licenses and experimental played-family comparison are separate calls."""
 import json
-from error_handler import Failure
-from Ports.request_executor import RequestSpec, object_at, selected, app_items
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import RequestSpec, object_at, selected, app_items
 
 FIELDS = ("appid", "name", "playtime_forever", "playtime_2weeks", "playtime_windows_forever",
           "playtime_mac_forever", "playtime_linux_forever", "playtime_deck_forever", "rtime_last_played", "family_shared")

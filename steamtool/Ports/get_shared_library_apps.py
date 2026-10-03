@@ -1,8 +1,8 @@
 import json
-from config import valid_steamid
-from error_handler import Failure
-from Ports.get_family_group_for_user import token_subject
-from Ports.request_executor import RequestSpec, object_at, app_items, selected, Result
+from steamtool.config import valid_steamid
+from steamtool.error_handler import Failure
+from steamtool.Ports.get_family_group_for_user import token_subject
+from steamtool.Ports.request_executor import RequestSpec, object_at, app_items, selected, Result
 
 MAX_APPS = 10000
 # ESharedLibraryExcludeReason in steam/steammessages_familygroups.steamclient.proto.

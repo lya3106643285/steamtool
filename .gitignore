@@ -11,3 +11,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 tests/fixtures/live/
+build/
+dist/
+*.egg-info/

@@ -7,10 +7,10 @@ import time
 import httpx
 import pytest
 
-from config import Config
-from error_handler import retry_after_seconds
-from Ports.registry import build_registry
-from Ports.request_executor import Executor, RequestSpec
+from steamtool.config import Config
+from steamtool.error_handler import retry_after_seconds
+from steamtool.Ports.registry import build_registry
+from steamtool.Ports.request_executor import Executor, RequestSpec
 
 SPEC = RequestSpec("synthetic", "https://api.steampowered.com/synthetic")
 

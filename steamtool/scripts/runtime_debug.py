@@ -10,7 +10,7 @@ import time
 import traceback
 from urllib.parse import quote
 
-from error_handler import Failure
+from steamtool.error_handler import Failure
 
 
 def utcnow():

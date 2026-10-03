@@ -5,12 +5,12 @@ import json
 import httpx
 import pytest
 
-from config import Config, load_config
-from error_handler import Failure
-from Ports.registry import Registry, Tool
-from Ports.request_executor import Executor, RequestSpec
-from scripts.persistence import new_run, save
-from scripts.runtime_debug import Redactor, Runtime
+from steamtool.config import Config, load_config
+from steamtool.error_handler import Failure
+from steamtool.Ports.registry import Registry, Tool
+from steamtool.Ports.request_executor import Executor, RequestSpec
+from steamtool.scripts.persistence import new_run, save
+from steamtool.scripts.runtime_debug import Redactor, Runtime
 
 
 def test_config(tmp_path):

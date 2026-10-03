@@ -123,3 +123,25 @@ SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未
 使用方式与环境路径依据 [Conda 官方环境管理文档](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html)。私人愿望单、逐游戏成就/统计、家庭四类样本与完整性仍需后续验收。保留此前阶段记录作为历史证据。
 
 本次提交仅包含迁移与验证改动；用户原有 README 排版调整及任务书向 task 的移动保留在工作区。
+
+## 2026-10-04：可安装 CLI 包与直接终端调用
+
+按用户要求，提供安装后的 shell 命令 `steamtool`，并保留 `teamtool` / `Steamtool` 别名。通过 pyproject.toml 的 console scripts 生成命令，由 pip 安装/卸载 `steamtool-cli`。代码统一放入 steamtool 命名空间，API 与业务职责边界不变；steamtool/scripts 仍为五个职责文件。源码 main.py、start/stop 保留为兼容入口，不承担安装/卸载职责。
+
+配置由安装目录分离到默认 `~/.steamtool`，可用绝对路径 STEAMTOOL_HOME 覆盖；配置、Outputs 和 .runtime 跨工作目录稳定。config init 创建空模板，config import 私密复制已有配置，两者均独占创建、权限 0600、拒绝覆盖。config path 不读取或打印秘密内容。wheel 包含空白资源模板，排除真实 .env、输出和运行状态。
+
+停止逻辑增加应用标识、安装入口和命令别名/软链接识别；继续验证锁令牌、PID 启动时间、boot ID、UID、配置目录及完整 argv，再通过 pidfd 发送信号。python -m steamtool 也可运行。无法确认身份仍拒绝发送信号。
+
+本机安装到现有项目 Conda 环境，在 ~/.local/bin 创建三项命令软链接，将用户命令目录加入 ~/.bashrc 的 PATH。新开终端可以直接调用，不需手动激活 Conda。软链接依赖当前安装环境的绝对路径，须保留该 Conda 环境；更换安装位置时需调整链接。原始项目 .env 保留，私密复制到 ~/.steamtool/.env；以后使用 config path 定位并维护安装版配置。
+
+验证：
+
+- 完整离线测试 **72 passed in 5.82s**。新增 wheel 独立安装、资源/命名空间检查、三项命令入口、配置权限/不覆盖、跨目录路径稳定、安装命令软链接下单实例与停止保存部分结果测试。测试临时环境仅用于隔离安装验证，项目运行环境继续由 Conda 管理。
+- 在 /tmp 直接执行 teamtool --version 与 steamtool --help，退出 0，无需激活环境。
+- 全局 steamtool doctor：退出 0、status=ok，public_probe/profile_probe/family_probe 均 ok、无最终错误。结果和日志保存在用户 Outputs，未提交。
+- 卸载本包后确认已安装模块消失，用户配置、结果及日志的内容哈希保持不变；重装 wheel 后三个命令入口恢复。
+- Python 编译、Bash 语法、pip check 均通过。
+
+打包方式参考 [PyPA 的 pyproject.toml 文档](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/) 和 [命令行工具打包文档](https://packaging.python.org/en/latest/guides/creating-command-line-tools/)。当前仅构建本地 wheel，未发布到 PyPI、未推送远端。已有私人愿望单、逐游戏成就/统计和家庭完整性验收边界继续保留。
+
+本次提交保留用户已有 README 表格排版和任务书移动为未提交工作区改动。

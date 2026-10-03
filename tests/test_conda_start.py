@@ -7,7 +7,9 @@ import sys
 
 import pytest
 
-from config import ROOT
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture

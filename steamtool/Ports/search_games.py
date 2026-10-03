@@ -1,7 +1,7 @@
 """Store search is a candidate generator, never a first-result resolver."""
-from config import valid_appid
-from error_handler import Failure
-from Ports.request_executor import RequestSpec
+from steamtool.config import valid_appid
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import RequestSpec
 
 
 async def call(executor, params, context):

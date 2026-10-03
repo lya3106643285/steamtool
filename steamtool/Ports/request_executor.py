@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import uuid
 
 import httpx
-from error_handler import Failure, decide, classify_http, classify_transport
+from steamtool.error_handler import Failure, decide, classify_http, classify_transport
 
 
 @dataclass
@@ -53,7 +53,7 @@ def selected(data, keys):
 
 
 def app_items(value):
-    from config import valid_appid
+    from steamtool.config import valid_appid
     if not isinstance(value, list) or any(not isinstance(x, dict) or not valid_appid(x.get("appid")) for x in value):
         raise Failure("RESPONSE_INVALID", "Expected AppID list")
     return value

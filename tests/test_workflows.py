@@ -6,11 +6,11 @@ import json
 import httpx
 import pytest
 
-from config import Config
-from Ports.registry import build_registry
-from Ports.request_executor import Executor, Result
-from scripts import library, wishlist, game
-from scripts.persistence import new_run
+from steamtool.config import Config
+from steamtool.Ports.registry import build_registry
+from steamtool.Ports.request_executor import Executor, Result
+from steamtool.scripts import library, wishlist, game
+from steamtool.scripts.persistence import new_run
 from tests.test_accounts import ME, OTHER, token
 
 

@@ -5,9 +5,9 @@ import json
 import time
 import httpx
 
-from config import Config
-from Ports.registry import build_registry
-from Ports.request_executor import Executor
+from steamtool.config import Config
+from steamtool.Ports.registry import build_registry
+from steamtool.Ports.request_executor import Executor
 
 ME = "76561198000000000"
 OTHER = "76561198000000001"

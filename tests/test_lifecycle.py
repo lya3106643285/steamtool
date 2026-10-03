@@ -16,20 +16,23 @@ import time
 import httpx
 import pytest
 
-from config import Config, ROOT
-from error_handler import Failure
-import main
-from scripts.persistence import new_run, save
-from scripts.runtime_debug import Runtime
+from steamtool.config import Config
+from steamtool.error_handler import Failure
+from steamtool import main
+from steamtool.scripts.persistence import new_run, save
+from steamtool.scripts.runtime_debug import Runtime
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
 def project(tmp_path):
     project = tmp_path / 'project'
     project.mkdir()
-    for name in ('main.py', 'config.py', 'error_handler.py', 'start', 'stop'):
+    for name in ('main.py', 'start', 'stop'):
         shutil.copy2(ROOT / name, project / name)
-    for name in ('Ports', 'scripts'):
+    for name in ('steamtool',):
         shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__'))
     # Use the interpreter running the suite; tests have no fixed developer env path.
     (project / '.conda').symlink_to(Path(sys.prefix), target_is_directory=True)
@@ -56,7 +59,7 @@ class Client(original):
         super().__init__(*args, **kwargs)
 httpx.AsyncClient = Client
 ''')
-    env = {k: v for k, v in os.environ.items() if not k.startswith('STEAM_') and k not in {'OUTPUT_DIR', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV'}}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('STEAM_', 'STEAMTOOL_')) and k not in {'OUTPUT_DIR', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV'}}
     env.update(PYTHONPATH=str(support), STEAM_STORE_RPS='1000', STEAM_WEBAPI_RPS='1000', STEAM_STOP_GRACE_SECONDS='.05', STEAM_PROGRESS_INTERVAL_SECONDS='.05')
     return project, env
 
@@ -140,11 +143,13 @@ def test_stop_during_shared_cooldown(project):
         child.communicate(timeout=5)
 
 
-def test_stale_or_reused_pid_is_not_signaled(tmp_path, monkeypatch):
+@pytest.mark.parametrize('wrong_start', [True, False])
+def test_stale_or_reused_pid_is_not_signaled(tmp_path, monkeypatch, wrong_start):
     directory = tmp_path / '.runtime'
     directory.mkdir()
-    info = dict(pid=os.getpid(), project=str(tmp_path), instance_id='fake', **main.process_identity(os.getpid()))
-    info['start_ticks'] = 'wrong'
+    info = dict(application='steamtool', pid=os.getpid(), project=str(tmp_path), instance_id='fake', **main.process_identity(os.getpid()))
+    if wrong_start:
+        info['start_ticks'] = 'wrong'
     (directory / 'instance.json').write_text(json.dumps(info))
     signaled = []
     monkeypatch.setattr(main, 'send_pidfd_signal', lambda *a: signaled.append(a))

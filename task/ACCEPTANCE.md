@@ -55,3 +55,11 @@
 项目 `.conda` 已创建（Python 3.12.14）；本地 `.env` 的三项配置生效，输出不展示秘密值。Conda 下完整离线测试 **66 passed in 2.79s**，包括 pidfd 系统 libc 兼容路径和四项 Conda 入口选择测试。Python 编译、pip check、Bash 语法通过。
 
 本人库、近期记录、家庭组与共享候选均返回 state=ok；家庭候选的完整性保守为 false，借玩补充响应的数量一致性也未确认，不据此声称数据全量。各类游戏、成就/统计和愿望单仍需后续真实样本对照。
+
+## 2026-10-04 CLI 安装及 shell 验证
+
+`steamtool-cli` wheel 已安装至本机 Conda 环境，shell 通过用户 PATH 中的命令入口直接调用 `steamtool` / `teamtool` / `Steamtool`，不需每次激活环境。完整测试 **72 passed in 5.82s**。
+
+新增 test_packaging.py 验证 wheel 不包含本地秘密/输出、脱离源码安装可运行、三项命令入口、config path/init/import、权限 0600 和拒绝覆盖、路径不随 cwd 改变，以及通过命令软链接运行后的单实例拦截、pidfd 停止和部分结果保存。D07 同时覆盖启动时间不符和完整 PID 信息吻合但属于其他命令的拒绝信号路径。
+
+在 /tmp 通过已安装全局命令执行 doctor，公开详情、本人资料与家庭组探测均 ok，退出 0；仅输出安全汇总。卸载/重装本包后验证用户配置、结果与日志内容未改变，命令恢复可用。未进行 PyPI 发布或远端推送。

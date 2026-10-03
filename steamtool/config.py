@@ -6,9 +6,15 @@ import os
 import re
 
 from dotenv import dotenv_values
-from error_handler import Failure
+from steamtool.error_handler import Failure
 
-ROOT = Path(__file__).resolve().parent
+def config_home(environ=None):
+    environ = os.environ if environ is None else environ
+    value = environ.get("STEAMTOOL_HOME")
+    root = Path(value).expanduser() if value else Path.home() / ".steamtool"
+    if not root.is_absolute():
+        raise Failure("CONFIG_INVALID", "STEAMTOOL_HOME must be an absolute path", source="config", scope="run")
+    return root.resolve()
 
 
 def valid_steamid(value):
@@ -22,13 +28,13 @@ def valid_appid(value):
 
 @dataclass(frozen=True)
 class Config:
-    root: Path = ROOT
+    root: Path = field(default_factory=config_home)
     api_key: str = field(default="", repr=False)
     steamid: str = ""
     family_token: str = field(default="", repr=False)
     language: str = "schinese"
     country: str = "CN"
-    output_dir: Path = ROOT / "Outputs"
+    output_dir: Path = field(default_factory=lambda: config_home() / "Outputs")
     concurrency: int = 4
     webapi_rps: float = 2
     store_rps: float = .5
@@ -50,7 +56,8 @@ class Config:
         return tuple(v for v in (self.api_key, self.family_token) if v)
 
 
-def load_config(root=ROOT, environ=None):
+def load_config(root=None, environ=None):
+    root = Path(root).resolve() if root is not None else config_home(environ)
     values = {**dotenv_values(root / ".env", interpolate=False),
               **(os.environ if environ is None else environ)}
     def get(name, default=""):

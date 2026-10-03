@@ -2,11 +2,11 @@
 import asyncio
 import time
 
-from error_handler import Failure
-from Ports.request_executor import Result
-from Ports.get_shared_library_apps import KNOWN_EXCLUDED_REASONS
-from scripts.game import add_result, block, record, enrich_store
-from scripts.persistence import index_app
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import Result
+from steamtool.Ports.get_shared_library_apps import KNOWN_EXCLUDED_REASONS
+from steamtool.scripts.game import add_result, block, record, enrich_store
+from steamtool.scripts.persistence import index_app
 
 
 async def collect_accounts(registry, config, document, runtime, *, player_data=True):

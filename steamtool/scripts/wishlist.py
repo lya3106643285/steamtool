@@ -1,10 +1,10 @@
 """Keep every identifiable wish, including unavailable store entries."""
 import asyncio
 
-from error_handler import Failure
-from scripts.game import add_result, block, record
-from scripts.library import collect_accounts, merge_ownership, enrich_items, finish_status
-from scripts.persistence import index_app
+from steamtool.error_handler import Failure
+from steamtool.scripts.game import add_result, block, record
+from steamtool.scripts.library import collect_accounts, merge_ownership, enrich_items, finish_status
+from steamtool.scripts.persistence import index_app
 
 
 async def collect_wishlist(registry, config, document):

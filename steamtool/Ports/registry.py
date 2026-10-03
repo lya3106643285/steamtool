@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import json
 import re
 
-from config import valid_appid, valid_steamid
-from error_handler import Failure
-from Ports.request_executor import Result
+from steamtool.config import valid_appid, valid_steamid
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import Result
 
 
 @dataclass(frozen=True)
@@ -104,13 +104,13 @@ class Registry:
 
 
 def build_registry(executor):
-    from Ports import get_app_details, search_games
+    from steamtool.Ports import get_app_details, search_games
     registry = Registry(executor)
     registry.register(Tool("get_app_details", get_app_details.call, rate_scope="store.steampowered.com",
                            required=("appid", "language", "country")))
     registry.register(Tool("search_games", search_games.call, rate_scope="store.steampowered.com",
                            required=("query", "language", "country")))
-    from Ports import (get_owned_games, get_recently_played_games, get_schema_for_game,
+    from steamtool.Ports import (get_owned_games, get_recently_played_games, get_schema_for_game,
                        get_player_achievements, get_user_stats_for_game, get_player_summaries,
                        resolve_vanity_url, get_family_group_for_user, get_shared_library_apps)
     registry.register(Tool("get_owned_games", get_owned_games.call, "user_key", required=("steamid",), optional=("include_family_licenses",)))
@@ -122,7 +122,7 @@ def build_registry(executor):
     registry.register(Tool("resolve_vanity_url", resolve_vanity_url.call, "user_key", required=("vanity",)))
     registry.register(Tool("get_family_group_for_user", get_family_group_for_user.call, "session_token", capability_status="experimental", required=("steamid",)))
     registry.register(Tool("get_shared_library_apps", get_shared_library_apps.call, "session_token", capability_status="experimental", required=("steamid", "family_groupid", "language")))
-    from Ports import get_wishlist, get_wishlist_item_count
+    from steamtool.Ports import get_wishlist, get_wishlist_item_count
     registry.register(Tool("get_wishlist", get_wishlist.call, capability_status="experimental", required=("steamid",)))
     registry.register(Tool("get_wishlist_item_count", get_wishlist_item_count.call, capability_status="experimental", required=("steamid",)))
     return registry

@@ -3,12 +3,12 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from config import Config
-from error_handler import Failure
-from Ports.registry import build_registry
-from Ports.request_executor import Executor
-from scripts.game import parse_target, run
-from scripts.persistence import new_run
+from steamtool.config import Config
+from steamtool.error_handler import Failure
+from steamtool.Ports.registry import build_registry
+from steamtool.Ports.request_executor import Executor
+from steamtool.scripts.game import parse_target, run
+from steamtool.scripts.persistence import new_run
 
 
 @pytest.mark.parametrize("query,appid", [("292030", 292030), ("https://store.steampowered.com/app/292030/The_Witcher/", 292030), ("巫师3", None)])

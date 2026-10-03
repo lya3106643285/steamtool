@@ -9,15 +9,15 @@ import time
 import httpx
 import pytest
 
-from config import Config
-from error_handler import Failure
-import main
-from Ports.get_shared_library_apps import MAX_APPS
-from Ports.registry import build_registry
-from Ports.request_executor import Executor, RequestSpec, Result
-from scripts import game, library
-from scripts.persistence import new_run, save
-from scripts.runtime_debug import Redactor, Runtime
+from steamtool.config import Config
+from steamtool.error_handler import Failure
+from steamtool import main
+from steamtool.Ports.get_shared_library_apps import MAX_APPS
+from steamtool.Ports.registry import build_registry
+from steamtool.Ports.request_executor import Executor, RequestSpec, Result
+from steamtool.scripts import game, library
+from steamtool.scripts.persistence import new_run, save
+from steamtool.scripts.runtime_debug import Redactor, Runtime
 from tests.test_accounts import ME, OTHER, token
 from tests.test_executor import FakeClock
 from tests.test_workflows import Fixtures

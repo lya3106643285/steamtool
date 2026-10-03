@@ -3,9 +3,9 @@ import base64
 import json
 import math
 import time
-from config import valid_steamid
-from error_handler import Failure
-from Ports.request_executor import RequestSpec, object_at, Result
+from steamtool.config import valid_steamid
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import RequestSpec, object_at, Result
 
 
 def token_subject(token):

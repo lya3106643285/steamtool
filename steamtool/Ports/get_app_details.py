@@ -1,6 +1,6 @@
 """Anonymous store details, one AppID per request."""
-from error_handler import Failure
-from Ports.request_executor import RequestSpec, object_at, selected
+from steamtool.error_handler import Failure
+from steamtool.Ports.request_executor import RequestSpec, object_at, selected
 
 FIELDS = ("steam_appid", "name", "type", "is_free", "short_description", "developers", "publishers",
           "platforms", "genres", "categories", "release_date", "price_overview", "required_age", "dlc", "website")

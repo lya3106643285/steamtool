@@ -2,9 +2,9 @@
 import re
 from urllib.parse import urlsplit
 
-from config import valid_appid
-from error_handler import Failure
-from scripts.persistence import index_app, normalize
+from steamtool.config import valid_appid
+from steamtool.error_handler import Failure
+from steamtool.scripts.persistence import index_app, normalize
 
 
 def block(state="not_requested", source=None, fetched_at=None, **fields):
@@ -95,8 +95,8 @@ async def run(registry, config, document, runtime, *, query=None, appid=None):
         runtime.task(f"app-{appid}", "running", appid=appid)
     await enrich_store(registry, config, document, item)
     if config.steamid:
-        from scripts.library import collect_accounts, merge_ownership, merge_playtime, finish_status
-        from scripts.wishlist import collect_wishlist, merge_wish
+        from steamtool.scripts.library import collect_accounts, merge_ownership, merge_playtime, finish_status
+        from steamtool.scripts.wishlist import collect_wishlist, merge_wish
         collections = await collect_accounts(registry, config, document, runtime)
         merge_ownership(item, collections, config.steamid)
         merge_playtime(item, collections, config.steamid)

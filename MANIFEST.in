@@ -1,0 +1,11 @@
+include README.md requirements.txt .env.example
+prune Outputs
+prune .runtime
+prune .conda
+prune .conda-pkgs
+prune .venv
+prune task
+prune dist
+prune build
+exclude .env
+global-exclude __pycache__ *.py[cod]

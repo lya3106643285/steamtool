@@ -7,8 +7,8 @@ import tempfile
 import unicodedata
 import uuid
 
-from error_handler import Failure
-from scripts.runtime_debug import utcnow
+from steamtool.error_handler import Failure
+from steamtool.scripts.runtime_debug import utcnow
 
 
 def normalize(name):

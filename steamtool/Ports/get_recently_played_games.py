@@ -1,7 +1,7 @@
 import json
-from error_handler import Failure
-from Ports.get_owned_games import FIELDS
-from Ports.request_executor import RequestSpec, object_at, app_items, selected
+from steamtool.error_handler import Failure
+from steamtool.Ports.get_owned_games import FIELDS
+from steamtool.Ports.request_executor import RequestSpec, object_at, app_items, selected
 
 
 async def call(executor, params, context):
