@@ -145,3 +145,15 @@ SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未
 打包方式参考 [PyPA 的 pyproject.toml 文档](https://packaging.python.org/en/latest/guides/writing-pyproject-toml/) 和 [命令行工具打包文档](https://packaging.python.org/en/latest/guides/creating-command-line-tools/)。当前仅构建本地 wheel，未发布到 PyPI、未推送远端。已有私人愿望单、逐游戏成就/统计和家庭完整性验收边界继续保留。
 
 本次提交保留用户已有 README 表格排版和任务书移动为未提交工作区改动。
+
+## 2026-10-04：Conda 命名环境 steamtool
+
+按用户要求，将环境规范改为命名环境 `steamtool`。`environment.yml` 的 name 改为 steamtool，README 改用 `conda env create --file environment.yml` 和 `conda activate steamtool`，补充退出旧 `.venv` 的使用步骤。
+
+本机使用 Conda 离线克隆原项目 `.conda` 至 `~/miniconda3/envs/steamtool`，保留 Python 3.12.14 与现有依赖；在新环境重新安装本地 CLI wheel，使入口的绝对 Python 路径指向新环境。用户 PATH 中 steamtool/teamtool/Steamtool 的软链接已原子更新。迁移时安装版 library 实例锁仍被占用，因此保留原 `.conda` 供已有任务继续使用，没有停止任务、改动凭据或删除结果。旧任务可在原终端完成或通过 Ctrl+C 收尾后切换环境。
+
+源码兼容入口 start 在显式 STEAM_CONDA_PREFIX 后，查询 Conda 环境注册表选择命名环境 steamtool；支持自定义 envs 目录及含空格路径，之后回退到旧项目 `.conda` 或已激活环境。仍直接 exec 选定环境的 Python，保留信号和实例身份。
+
+验证：新命名环境中完整离线测试 **74 passed in 19.11s**；新增命名环境优先于旧项目/无关活动环境、无需激活即可选择命名环境的测试。实际激活后 Python sys.prefix 为命名环境目录，pip check 无依赖冲突；在 /tmp 直接运行 steamtool/teamtool --version、源码 start --help 及 Bash 语法检查均通过。本轮没有新增 Steam 网络请求。
+
+环境克隆参考 [Conda 官方环境管理文档](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#cloning-an-environment)。原有 README 表格排版和任务书移动继续保留为未提交工作区改动。

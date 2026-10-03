@@ -4,13 +4,26 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export STEAMTOOL_HOME="${STEAMTOOL_HOME:-$PROJECT_ROOT}"
 if [[ -n "${STEAM_CONDA_PREFIX:-}" ]]; then
   PROJECT_ENV="$STEAM_CONDA_PREFIX"
-elif [[ -d "$PROJECT_ROOT/.conda" ]]; then
-  PROJECT_ENV="$PROJECT_ROOT/.conda"
 else
-  PROJECT_ENV="${CONDA_PREFIX:-$PROJECT_ROOT/.conda}"
+  PROJECT_ENV=""
+  STEAM_CONDA_COMMAND="${CONDA_EXE:-$(command -v conda || true)}"
+  if [[ -x "$STEAM_CONDA_COMMAND" ]]; then
+    STEAM_CONDA_BASE="$("$STEAM_CONDA_COMMAND" info --base 2>/dev/null || true)"
+    if [[ -x "$STEAM_CONDA_BASE/bin/python" ]]; then
+      PROJECT_ENV="$("$STEAM_CONDA_COMMAND" env list --json 2>/dev/null |
+        "$STEAM_CONDA_BASE/bin/python" -c 'import json, pathlib, sys; print(next((p for p in json.load(sys.stdin).get("envs", []) if pathlib.Path(p).is_absolute() and pathlib.Path(p).name == "steamtool"), ""))' 2>/dev/null || true)"
+    fi
+  fi
+  if [[ -z "$PROJECT_ENV" ]]; then
+    if [[ -d "$PROJECT_ROOT/.conda" ]]; then
+      PROJECT_ENV="$PROJECT_ROOT/.conda"
+    else
+      PROJECT_ENV="${CONDA_PREFIX:-$PROJECT_ROOT/.conda}"
+    fi
+  fi
 fi
 if [[ ! -f "$PROJECT_ENV/conda-meta/history" || ! -x "$PROJECT_ENV/bin/python" ]]; then
-  printf '%s\n' '缺少 Conda 环境。请在项目目录执行：conda env create --prefix ./.conda --file environment.yml' >&2
+  printf '%s\n' '缺少 Conda 环境。请在项目目录执行：conda env create --file environment.yml，然后 conda activate steamtool' >&2
   printf '%s\n' '也可激活已有 Conda 环境，或通过 STEAM_CONDA_PREFIX 指定其绝对路径。' >&2
   exit 1
 fi

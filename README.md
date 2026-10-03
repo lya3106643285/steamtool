@@ -48,21 +48,33 @@ steamtool library                 # 导出游戏库与可取得的补充信息
 steamtool 是可安装的 Python CLI 包，发行包名称为 `steamtool-cli`，命令名称为 `steamtool`。使用 Conda 管理 Python 和依赖，在本项目目录首次安装：
 
 ```bash
-conda env create --prefix ./.conda --file environment.yml
-conda activate ./.conda
+conda env create --file environment.yml
+conda activate steamtool
 steamtool --version
 ```
 
 已有本项目 Conda 环境时，无需重建：
 
 ```bash
-conda activate ./.conda
+conda activate steamtool
 python -m pip install .
 # 需要运行离线测试时：
 python -m pip install -r requirements-dev.txt
 ```
 
-`environment.yml` 固定 Python 3.12 并安装本地包；运行依赖固定在 `requirements.txt`。激活安装了本包的 Conda 环境后，任何目录都可调用 `steamtool`。也可直接调用环境的 `bin/steamtool`。支持 Python 3.11+，当前验证环境为 Python 3.12.14 / Conda 26.1.1。
+
+若终端提示符仍显示 `(.venv)`，先退出旧虚拟环境，再切换到命名环境：
+
+```bash
+deactivate
+conda activate steamtool
+python --version
+steamtool --version
+```
+
+此后提示符会显示 `(steamtool)`。已配置用户 PATH 时，日常运行 `steamtool` 无需激活；命名环境用于安装、更新和开发。环境迁移期间正在运行的导出继续使用原环境，待任务结束后再切换当前终端；也可在原任务终端按 `Ctrl+C` 保存部分结果后切换。
+
+`environment.yml` 将环境命名为 `steamtool`，固定 Python 3.12 并安装本地包；运行依赖固定在 `requirements.txt`。激活安装了本包的 Conda 环境后，任何目录都可调用 `steamtool`。也可直接调用环境的 `bin/steamtool`。支持 Python 3.11+，当前验证环境为 Python 3.12.14 / Conda 26.1.1。
 
 若希望打开终端即可调用，安装后将入口加入用户 PATH（在安装本包的 Conda 环境中执行一次）：
 
@@ -169,7 +181,7 @@ python -m pip wheel . --no-deps --wheel-dir dist
 python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 ```
 
-源码中的 `./start` / `./stop` 仅保留为兼容入口，默认使用项目目录的 `.env` 和输出，选择 Conda 环境的顺序为 `STEAM_CONDA_PREFIX` → 项目 `.conda` → 已激活的 `CONDA_PREFIX`。安装后的 `steamtool` 使用上文用户配置目录。若想直接沿用项目配置而不复制，可设置 `export STEAMTOOL_HOME=/绝对路径/到/steam-tools` 后调用 `steamtool`。
+源码中的 `./start` / `./stop` 仅保留为兼容入口，默认使用项目目录的 `.env` 和输出，选择 Conda 环境的顺序为 `STEAM_CONDA_PREFIX` → 命名环境 `steamtool` → 旧项目 `.conda` → 已激活的 `CONDA_PREFIX`。安装后的 `steamtool` 使用上文用户配置目录。若想直接沿用项目配置而不复制，可设置 `export STEAMTOOL_HOME=/绝对路径/到/steam-tools` 后调用 `steamtool`。
 
 无参数且 stdin 非交互时显示用法并退出。名称仅在返回候选中有唯一精确匹配时自动选择；模糊或同名结果写出 `needs_selection` JSON。使用候选 AppID 再执行即可，非交互命令不会等待输入。`sub` / `bundle` URL 明确不支持。
 
@@ -258,7 +270,7 @@ SIGINT/SIGTERM 或 `steamtool stop` 会停止新派发、唤醒限速与重试�
 ## 测试与开发
 
 ```bash
-conda activate ./.conda
+conda activate steamtool
 python -m pytest -q
 python -m compileall -q main.py steamtool
 python -m pip check

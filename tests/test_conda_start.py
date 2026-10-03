@@ -18,7 +18,9 @@ def launcher(tmp_path):
     project.mkdir()
     shutil.copy2(ROOT / 'start', project / 'start')
     (project / 'main.py').write_text('import sys; print(repr(sys.argv[1:]))\n')
-    env = {k: v for k, v in os.environ.items() if k not in {'STEAM_CONDA_PREFIX', 'CONDA_PREFIX'}}
+    env = {k: v for k, v in os.environ.items() if k not in {'STEAM_CONDA_PREFIX', 'CONDA_PREFIX', 'CONDA_DEFAULT_ENV'}}
+    # Do not discover the developer's real named environments in isolated tests.
+    env['CONDA_EXE'] = '/nonexistent/test-conda'
     return project, env
 
 
@@ -56,3 +58,32 @@ def test_legacy_venv_is_not_selected_and_missing_conda_explained(launcher):
     result = invoke(project, env, '--help')
     assert result.returncode == 1 and 'conda env create' in result.stderr
     assert result.stdout == ''
+
+
+def named_conda(project, env):
+    named = project.parent / 'custom envs' / 'steamtool'
+    named.parent.mkdir()
+    named.symlink_to(sys.prefix, target_is_directory=True)
+    command = project.parent / 'test-conda'
+    command.write_text('#!/bin/sh\nif [ "$1" = "info" ]; then\n  printf "%s\\n" "$TEST_CONDA_BASE"\nelse\n  printf "%s\\n" "$TEST_CONDA_ENVS"\nfi\n')
+    command.chmod(0o755)
+    import json
+    env.update(CONDA_EXE=str(command), TEST_CONDA_BASE=sys.prefix,
+               TEST_CONDA_ENVS=json.dumps({'envs': [sys.prefix, str(named)]}))
+    return named
+
+
+def test_named_environment_precedes_project_and_unrelated_active(launcher):
+    project, env = launcher
+    named_conda(project, env)
+    (project / '.conda').mkdir()  # Invalid legacy environment must not win.
+    env['CONDA_PREFIX'] = '/nonexistent/unrelated-environment'
+    result = invoke(project, env, '--help')
+    assert result.returncode == 0 and '--help' in result.stdout
+
+
+def test_named_environment_is_used_without_project_or_activation(launcher):
+    project, env = launcher
+    named_conda(project, env)
+    result = invoke(project, env, 'game', 'Portal 2')
+    assert result.returncode == 0 and "'Portal 2'" in result.stdout
