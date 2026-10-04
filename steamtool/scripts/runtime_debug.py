@@ -49,6 +49,9 @@ class Runtime:
         self.tasks = {}
         self.total = None
         self.phases = {}
+        self.http_by_api = {}
+        self.operations = {}
+        self.enrichment_plan = Counter()
         self.level = getattr(logging, level)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,11 +80,23 @@ class Runtime:
             print("LOG_WRITE_FAILED: stopping new requests", file=sys.stderr)
             raise Failure("LOG_WRITE_FAILED", "Runtime log write failed", source="runtime") from None
         self.counts[event] += 1
+        api = fields.get("api")
+        if api and event in {"request_queued", "request_started", "request_finished", "retry_scheduled"}:
+            counts = self.http_by_api.setdefault(api, Counter())
+            metric = {"request_queued": "logical_requests", "request_started": "attempts",
+                      "retry_scheduled": "retries"}.get(event, fields.get("outcome"))
+            counts[metric] += 1
+        if event == "operation_finished":
+            self.operations[fields["operation_id"]] = fields["outcome"]
+        if event == "enrichment_decision":
+            self.enrichment_plan[f"{fields['operation']}_{fields['decision']}"] += 1
+        if event == "run_cache_hit" and api in {"get_schema_for_game", "get_app_details", "get_player_achievements", "get_user_stats_for_game"}:
+            self.enrichment_plan["dedup_hits"] += 1
         if event in {"run_started", "progress_snapshot", "export_saved", "run_finished", "stop_requested", "export_failed"} and getattr(logging, level) >= self.level:
             print(self.redact(f"[{self.feature}] {event} {fields.get('message', '')}"), file=sys.stderr)
 
     def task(self, task_id, state, **fields):
-        if self.tasks.get(task_id) in {"success", "failed", "skipped", "cancelled"}:
+        if self.tasks.get(task_id) in {"success", "not_applicable", "data_unavailable", "failed", "cancelled"}:
             return
         self.tasks[task_id] = state
         self.event("task_started" if state == "running" else "task_finished", task_id=task_id, state=state, **fields)
@@ -89,7 +104,7 @@ class Runtime:
     def snapshot(self):
         counts = Counter(self.tasks.values())
         return dict(total=self.total, pending=None if self.total is None else max(0, self.total - len(self.tasks)),
-                    **{s: counts[s] for s in ("running", "success", "failed", "skipped", "cancelled")})
+                    **{s: counts[s] for s in ("running", "success", "not_applicable", "data_unavailable", "failed", "cancelled")})
 
     async def progress(self, interval):
         while True:
@@ -101,10 +116,20 @@ class Runtime:
         return {"exception_type": type(exc).__name__, "stack": traceback.format_tb(exc.__traceback__)}
 
     def summary(self):
+        api_keys = ("logical_requests", "attempts", "success", "not_applicable", "data_unavailable", "failed", "retries")
+        apis = set(self.http_by_api) | {"get_schema_for_game", "get_player_achievements", "get_user_stats_for_game", "get_app_details"}
+        operations = Counter(self.operations.values())
         return dict(wall_duration_ms=round((time.monotonic() - self.started) * 1000, 3),
                     http_attempts=self.counts["request_started"], logical_requests=self.counts["request_queued"],
                     retries=self.counts["retry_scheduled"], rate_limits=self.counts["cooldown_started"],
-                    cache_hits=self.counts["run_cache_hit"], tasks=self.snapshot(), phase_duration_ms=self.phases)
+                    cache_hits=self.counts["run_cache_hit"], tasks=self.snapshot(), task_unit="app_enrichment",
+                    operations=dict(total=len(self.operations), **{s: operations[s] for s in ("success", "not_applicable", "data_unavailable", "failed")}),
+                    http_by_api={api: {key: self.http_by_api.get(api, {}).get(key, 0) for key in api_keys} for api in sorted(apis)},
+                    enrichment_plan={key: self.enrichment_plan[key] for key in (
+                        "input_apps", "schema_scheduled", "store_scheduled", "achievements_scheduled", "stats_scheduled",
+                        "achievements_skipped_not_applicable", "stats_skipped_not_applicable",
+                        "achievements_skipped_dependency", "stats_skipped_dependency", "dedup_hits")},
+                    phase_duration_ms=self.phases)
 
     def close(self):
         try:

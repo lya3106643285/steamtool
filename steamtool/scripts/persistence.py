@@ -18,7 +18,7 @@ def normalize(name):
 def new_run(feature, config):
     run_id = uuid.uuid4().hex[:12]
     stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + f"_{feature}_{run_id}"
-    result = dict(schema_version="1.0.0", meta=dict(run_id=run_id, feature=feature,
+    result = dict(schema_version="1.1.0", meta=dict(run_id=run_id, feature=feature,
                   started_at=utcnow(), finished_at=None, subject_steamid=config.steamid or None,
                   language=config.language, store_country=config.country), status="ok",
                   data=dict(items=[], resolution=None, summary={}), id_map={}, name_index={}, coverage={}, errors=[])

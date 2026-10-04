@@ -4,11 +4,13 @@ from urllib.parse import urlsplit
 
 from steamtool.config import valid_appid
 from steamtool.error_handler import Failure
+from steamtool.error_handler import result_outcome
 from steamtool.scripts.persistence import index_app, normalize
 
 
 def block(state="not_requested", source=None, fetched_at=None, **fields):
-    return dict(state=state, source=source, fetched_at=fetched_at, **fields)
+    return dict(state=state, outcome=result_outcome(state) if state != "not_requested" else None,
+                source=source, fetched_at=fetched_at, **fields)
 
 
 def record(appid, steamid, name=None):
@@ -25,10 +27,11 @@ def record(appid, steamid, name=None):
 
 def add_result(document, key, result, **extra):
     document["coverage"][key] = dict(state=result.state, source=result.source, fetched_at=result.fetched_at,
+        outcome=result.outcome,
         complete=result.data.get("complete") if result.state in {"ok", "not_applicable"} else None,
         count=len(result.data["items"]) if "items" in result.data else None,
         error_id=result.error["error_id"] if result.error else None, **extra)
-    if result.error and not any(e["error_id"] == result.error["error_id"] for e in document["errors"]):
+    if result.error and result.outcome != "not_applicable" and not any(e["error_id"] == result.error["error_id"] for e in document["errors"]):
         document["errors"].append(result.error)
 
 
@@ -52,9 +55,12 @@ def parse_target(query=None, appid=None):
 
 
 async def enrich_store(registry, config, document, item):
+    registry.executor.event("enrichment_decision", appid=item["appid"], operation="store", decision="scheduled", reason="independent store lookup")
     result = await registry.call("get_app_details", {"appid": item["appid"], "language": config.language, "country": config.country},
                                  {"task_id": f"app-{item['appid']}"})
     add_result(document, f"store:{item['appid']}", result)
+    registry.executor.event("operation_finished", api=result.source, appid=item["appid"],
+                            operation_id=f"store:{item['appid']}", outcome=result.outcome)
     item["store"] = block(result.state, result.source, result.fetched_at,
                           error_id=result.error["error_id"] if result.error else None,
                           data=result.data if result.state == "ok" else None)

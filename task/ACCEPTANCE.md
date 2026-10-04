@@ -81,3 +81,59 @@
 接口证据样本计数：本人持有且有时长 79；本人不持有、家人持有且有本人时长 12；本人不持有且可共享但无本人时长记录 83；本人不持有、家人持有且被排除 7。第三类不能确认从未玩过；四类尚未完成人工客户端核对。不将不可用字段推断为空、零时长或没有成就。
 
 输出所有 AppID 均进入 id_map，时长/成就/统计主体均与配置本人一致；业务 JSON 不含配置中的 Key/token。业务 JSON、运行日志和完整性复查报告只存本地用户 Outputs，未提交私人清单。本轮未执行愿望单。
+
+## V1.1 工程补丁离线验收（2026-10-04）
+
+基线代码在项目 Conda 环境下 74 项测试通过；补丁后 `.conda/bin/python -m pytest -q` 为 **111 passed in 14.35s**。这是离线结果，包含单元测试、httpx.MockTransport 工作流、真实子进程停止与 wheel 独立安装测试，不代表真实 Steam 接口全部可用。旧 `.venv` 缺少打包依赖且不满足 Conda 入口测试约定，未作为验收环境。Python 编译、Bash 语法、依赖检查及 diff 空白检查通过。
+
+新增 `tests/test_v11.py` 覆盖以下契约：
+
+| 契约 | 离线证据 |
+| --- | --- |
+| capability / data / genuine failure 分类 | 错误码映射；Store success=false；HTTP 400 结构化无统计、错误结构和错误状态成功体；schema 缺失与损坏；超时/503 达到最大尝试 |
+| schema 下游依赖 | 空成就、空 stats、单项能力、两项能力；按证据调用恰好一次；schema 失败时两个块为 data_unavailable，保留 DEPENDENCY_FAILED |
+| App 并发与流水线 | 较慢 App 的 schema 必须等另一个 App 已开始玩家成就，验证无全局阶段屏障；原 100 请求并发测试继续通过 |
+| in-run dedup | owned/family/recent 重复 App 只补充一次；并发与先后调用共享终态，包括失败；语言、账号和地区保持隔离；首个订阅者取消不丢共享结果 |
+| Family ownership 回归 | 本人独有、家人独有、双方持有、家人持有但被排除；认证 adapter 和枚举解析未修改 |
+| 既有字段回归 | 解锁时间、统计值、平台时长、近期时长、最后游玩时间、商店详情、主体绑定和 0/null 保留 |
+| 顶层状态 | 可选补充结果不单独影响 library 主状态；核心单源失败为 partial；近期记录不能掩盖所有核心来源失败 |
+| runtime 口径 | 一个 App 一个 task；四个 operation 独立计数；API 实际请求/发送/终态/重试及 planner 统计；cancelled 为终态 |
+
+成功块兼容保留 `state=ok`，新增 `outcome=success`；schema_version 为 1.1.0。真正失败与不可用均能在 coverage 和 item 上独立表达。Planner 诊断不根据名称或未经映射的 app_type 判定能力。
+
+## V1.1 真实 Steam 验收（2026-10-04）
+
+按任务书使用已有本地凭据执行 `./start library` 到自然结束。run_id=`29c6dae6fff1`，schema_version=`1.1.0`，status=partial，退出 2。与基线账号、语言、地区及并发/速率一致；近期窗口由 10 条变为 9 条，但总 App 集合仍完全一致。
+
+| 指标 | V1.0 基线 | V1.1 |
+| --- | ---: | ---: |
+| App 数 | 419 | 419 |
+| Logical requests | 1668 | 1157 |
+| HTTP attempts | 1668 | 1157 |
+| App task success | 25 | 148 |
+| App task not_applicable | 无独立统计 | 0 |
+| App task data_unavailable | 无独立统计 | 270 |
+| App task failed | 394 | 1 |
+| Wall duration | 840.601953 s | 840.671880 s |
+| Enrichment duration | 837.042028 s | 837.084593 s |
+
+任务单位固定为 App；旧 failed 含可选数据缺失，与新结果不是同一口径。新独立 operations=1676：success 742、not_applicable 140、data_unavailable 793、failed 1。HTTP 最终统计独立于跳过的 operation：
+
+| API | Logical/attempts | Success | Not applicable | Data unavailable | Failed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| get_schema_for_game | 419 | 227 | 0 | 192 | 0 |
+| get_player_achievements | 214 | 213 | 0 | 0 | 1 |
+| get_user_stats_for_game | 100 | 25 | 0 | 75 | 0 |
+| get_app_details | 419 | 277 | 0 | 142 | 0 |
+
+另有核心 collection 5 次请求，全部成功；无 retries/429。13 次成就和 127 次 stats 因明确空 schema 定义跳过；192 个 schema 不可用的 App 各跳过两个下游，保持能力 unknown。少 511 次请求（30.64%）。运行内重复请求 0，跳过却实际发出请求 0；源集合合并后没有重复调用，因此实测 cache_hits/dedup_hits=0，缓存共享行为另由 MockTransport 测试验证。
+
+Family group 和 Family library 均 ok，家庭候选 419 条；五个 ownership 字段逐项对照无变化，AppID 遗漏/额外/重复均 0。时长 137、成就 213、stats 25、Store 277 个基线成功块全部仍成功；成就条目/解锁时间、stats 值、总时长/平台时长/最后游玩时间均无变化。所有个人块主体匹配，全部主 AppID 有映射，业务 JSON 和 runtime JSONL 无本地 Key/token。运行中的 Python 源码哈希保持不变。
+
+真实样本：Portal 2 成就 51 项、stats 23 项，Left 4 Dead 成就 73 项、stats 42 项，二者 Store 成功；Cities: Skylines 的本人持有=false、家人持有=true、可共享=true；Source SDK Base 2006 的 schema/store 无数据且下游没有请求，归 data_unavailable；13 个原无成就 App 保持 not_applicable。唯一 ACCESS_DENIED 是与基线相同的玩家成就 HTTP 403 请求，继续归 failed，没有用低 failed 数字掩盖它。
+
+时间没有下降：同样 419 次 Store 请求在 0.5 RPS 下有约 836 秒发送间隔，仍占关键路径。请求规划降低 Web API 数量但没有减少 Store 请求；原并发 4 及统一 rate scope 不变，不能把这次结果描述为 wall time 优化成功。
+
+顶层 partial 由既有 279 条 available_via_family 未知决定，而非可选补充缺失；保留 null，没有改写 Family 资格语义来制造 ok。真实账号权限拒绝仍需用户自行确认；家庭客户端全量、其他账号/地区、网络重试与取消的线上行为尚未验证（后两项有离线测试）。跨运行缓存、可靠类型映射与性能调参暂不实施。
+
+JSON、JSONL 和 audit.json 留在项目 Outputs、未加入 Git。当前只修改源码，未重新安装用户命名环境的 CLI；源码入口是本次真实验收对象。

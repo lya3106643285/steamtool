@@ -74,6 +74,8 @@ steamtool --version
 
 此后提示符会显示 `(steamtool)`。已配置用户 PATH 时，日常运行 `steamtool` 无需激活；命名环境用于安装、更新和开发。环境迁移期间正在运行的导出继续使用原环境，待任务结束后再切换当前终端；也可在原任务终端按 `Ctrl+C` 保存部分结果后切换。
 
+本项目已移除旧 `.venv`，并在 `.vscode/settings.json` 关闭 VS Code 终端自动激活、将默认 Python 解释器指向 Conda 命名环境 `steamtool`。打开新终端不会再自动执行旧 `.venv/bin/activate`；已激活的终端可执行 `deactivate` 或重新打开终端，再按需执行 `conda activate steamtool`。
+
 `environment.yml` 将环境命名为 `steamtool`，固定 Python 3.12 并安装本地包；运行依赖固定在 `requirements.txt`。激活安装了本包的 Conda 环境后，任何目录都可调用 `steamtool`。也可直接调用环境的 `bin/steamtool`。支持 Python 3.11+，当前验证环境为 Python 3.12.14 / Conda 26.1.1。
 
 若希望打开终端即可调用，安装后将入口加入用户 PATH（在安装本包的 Conda 环境中执行一次）：
@@ -100,14 +102,14 @@ steamtool config path
 
 **不要提交 `.env`，也不要把 Key、token、Cookie 贴到聊天或测试报告中。**
 
-| 配置 | 用途 |
-|---|---|
-| `STEAM_ID` | 本人公开个人账号的数字 SteamID64；保存为字符串 |
-| `STEAM_API_KEY` | 本人普通 Web API Key；配置后可查询可见的库、时长、成就和统计 |
-| `STEAM_FAMILY_ACCESS_TOKEN` | 本人本地提供的有效会话 access token；仅家庭只读接口使用 |
-| `STEAM_LANGUAGE` / `STEAM_STORE_COUNTRY` | 默认 `schinese` / `CN`；查询上下文，不代表识别出的账户地区 |
-| `OUTPUT_DIR` | 默认 `Outputs`；相对配置目录解析 |
-| `LOG_LEVEL` | 默认 `INFO`；DEBUG 同样脱敏 |
+| 配置                                         | 用途                                                          |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| `STEAM_ID`                                 | 本人公开个人账号的数字 SteamID64；保存为字符串                |
+| `STEAM_API_KEY`                            | 本人普通 Web API Key；配置后可查询可见的库、时长、成就和统计  |
+| `STEAM_FAMILY_ACCESS_TOKEN`                | 本人本地提供的有效会话 access token；仅家庭只读接口使用       |
+| `STEAM_LANGUAGE` / `STEAM_STORE_COUNTRY` | 默认`schinese` / `CN`；查询上下文，不代表识别出的账户地区 |
+| `OUTPUT_DIR`                               | 默认`Outputs`；相对配置目录解析                           |
+| `LOG_LEVEL`                                | 默认`INFO`；DEBUG 同样脱敏                                  |
 
 环境变量优先于 `.env`，再使用默认值。`.env` 由 Python 读取，不执行 shell 内容。Key/token 不接受 CLI 参数。无需凭据即可搜索商店和读取单款公开详情；未配置 SteamID 时账号部分为 `not_requested`，拥有关系仍为 `null`。
 
@@ -196,15 +198,23 @@ python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 20261002T160000000000Z_library_012345abcdef.runtime.jsonl
 ```
 
-业务 JSON 使用 `schema_version=1.0.0`，包含 `meta`、`status`、`data.items/resolution/summary`、`id_map`、`name_index`、`coverage` 和最终仍影响结果的 `errors`。日志逐行独立解析，记录阶段、任务、请求、重试、冷却、缓存命中、进度和运行摘要。历史重试失败只留日志；恢复成功不追加到业务错误清单。
+业务 JSON 使用 `schema_version=1.1.0`，包含 `meta`、`status`、`data.items/resolution/summary`、`id_map`、`name_index`、`coverage` 和最终仍影响结果的 `errors`。日志逐行独立解析，记录阶段、任务、请求、重试、冷却、缓存命中、进度和运行摘要。历史重试失败只留日志；恢复成功不追加到业务错误清单。
 
-| 状态 | 退出码 | 含义 |
-|---|---:|---|
-| `ok` | 0 | 声明范围完成；公开模式不声称账号数据可用 |
-| `partial` | 2 | 保留主要结果，仍有来源缺失或完整性不足 |
-| `needs_selection` | 2 | 名称需要通过候选 AppID 确定 |
-| `failed` | 1 | 关键清单失败、配置/程序错误、输出或日志失败 |
-| `cancelled` | 130 | 用户停止，尽力保存已取得数据 |
+V1.1 的完成结果 `outcome` 为 `success / not_applicable / data_unavailable / failed`，用户停止为 `cancelled`。成功块保留 V1.0 的 `state=ok` 并新增 `outcome=success`；未请求块的 outcome 为 null。明确无能力使用 `state=not_applicable`；上游不提供数据或 schema 依赖不可用使用 `state=data_unavailable`；网络重试耗尽、认证失败及损坏响应使用 `state=failed`。ownership 的 `partial` 与时长、清单的三值语义保留；没有时长来源的既有块保留 `state=unavailable`，并明确给出 `outcome=data_unavailable`。
+
+Library 的顶层状态由核心本人/家庭清单和 ownership 证据决定。可选补充块缺能力、无数据或请求失败不单独使 library 变成 partial；其失败仍保留在块、coverage、errors 和运行统计中。家庭实验性 `complete=false` 继续导出，单独这项完整性限制不判为 partial；明确截断、本人清单数量不一致、核心来源失败或关键 ownership 未知仍判为 partial。
+
+Enrichment 先合并 AppID；各 App 并发查询 schema 和商店详情。schema 的有效成就/stat 定义分别触发玩家成就和个人统计请求，两者可并行；有效空定义跳过下游并标为 not_applicable。schema 不可用时跳过下游并标为 data_unavailable，记录 DEPENDENCY_FAILED，能力仍为 unknown。不会按名称或未经可靠映射的 app_type 数值跳过。schema 同时提供 stats 与 achievements 定义的用途见 [Valve ISteamUserStats 文档](https://partner.steamgames.com/doc/webapi/ISteamUserStats?l=english)。
+
+同一运行按 API 和完整查询参数共享 future/result，包括最终失败结果；重试仍由统一执行器处理。无跨运行持久缓存。runtime_summary 的 tasks 固定为一个 App enrichment 一个 task，按 failed、data_unavailable、success、not_applicable 的优先级汇总其四项操作；operations 单独统计 API 逻辑操作（含依赖跳过），http_by_api 统计实际逻辑请求、发送次数和最终结果，enrichment_plan 与 enrichment_decision 日志解释调度和跳过原因。未真正发出的下游请求不会增加 HTTP 数量。
+
+| 状态                | 退出码 | 含义                                        |
+| ------------------- | -----: | ------------------------------------------- |
+| `ok`              |      0 | 声明范围完成；公开模式不声称账号数据可用    |
+| `partial`         |      2 | 保留主要结果，仍有来源缺失或完整性不足      |
+| `needs_selection` |      2 | 名称需要通过候选 AppID 确定                 |
+| `failed`          |      1 | 关键清单失败、配置/程序错误、输出或日志失败 |
+| `cancelled`       |    130 | 用户停止，尽力保存已取得数据                |
 
 核心语义：
 
@@ -254,20 +264,44 @@ python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 
 业务 JSON、JSONL 日志和额外完整性核对报告保存在本机 `~/.steamtool/Outputs`，含账号与游戏清单的数据不提交 Git。其他账号或后续运行的数量可能不同；私人愿望单仍未在本轮测试。
 
+## 2026-10-04 V1.1 补丁真实 benchmark
+
+使用源码入口 `./start library`、同一账号及原请求配置完成 run `29c6dae6fff1`，schema_version=1.1.0。所有 419 个 AppID 及五项 ownership 字段与 V1.0 基线完全一致。原成功的时长 137、成就 213、stats 25、Store 277 个块全部保留；成功成就条目、stats 值、总时长/平台时长/最后游玩时间也与基线一致。Family 两个接口成功，家庭候选 419 条，无重复 enrichment 请求，无已跳过请求被实际发出的情况，Key/token 没有出现在 JSON 或 JSONL 中。
+
+| 指标 | V1.0 基线 | V1.1 |
+| --- | ---: | ---: |
+| App 数 | 419 | 419 |
+| Logical requests | 1668 | 1157 |
+| HTTP attempts | 1668 | 1157 |
+| App task success | 25 | 148 |
+| App task not_applicable | 无独立统计 | 0 |
+| App task data_unavailable | 无独立统计 | 270 |
+| App task failed | 394 | 1 |
+| Wall duration | 840.60 s | 840.67 s |
+| Enrichment duration | 837.04 s | 837.08 s |
+
+旧 failed 包含可选数据缺失，新旧成功/失败数不能按同一口径直接比较。一个 App 汇总四项 operation，包含成功操作时不会仅因部分能力不适用而把整个 App 标为 not_applicable；独立 operation 中 not_applicable 为 **140**（成就 13、stats 127）。真实请求中 schema 419、Store 419、成就 214、stats 100，另有 collection 5 次；相对基线少 **511 次（30.64%）**。schema 不可用的 192 个 App 各跳过两个下游，能力保持 unknown。唯一真正失败为玩家成就 HTTP 403 ACCESS_DENIED，和基线为同一个请求，未吞掉错误。
+
+耗时没有下降：419 次 Store 请求在原 0.5 RPS 下发送间隔约需 836 秒，仍占据关键路径。全局并发仍为 4，离线并发和流水线测试通过；本轮没有通过串行或调高速率改变测量条件。顶层仍为 partial、退出 2，原因是既有 279 条 available_via_family 为 null 的关键 ownership 不确定性；可选 enrichment 不再单独影响主状态。
+
+Portal 2、Left 4 Dead 的成就/stats/Store 均实际成功；Cities: Skylines 继续为本人不持有、家人持有且可共享；Source SDK Base 2006 的补充为 data_unavailable，不再产生 failed 风暴；原 13 个明确无成就的 App 全部保留该语义且没有成就请求。客户端全量对照、其他账号/地区/权限、实时网络重试仍未实测；长期缓存和复杂类型映射留待后续版本。
+
+本轮 111 项离线测试通过，包含单元、MockTransport、子进程及 wheel 测试。真实 JSON、日志和审计汇总在项目 Outputs；本轮仅更新源码与文档，没有重装命名环境中已安装的 CLI。要让安装版 `steamtool` 使用补丁，需按上文从当前源码重新构建并安装 wheel。
+
 ## 请求控制与停止
 
-| 参数 | 默认 |
-|---|---:|
-| `STEAM_MAX_CONCURRENCY` | 4 个真实 HTTP 在途请求 |
-| `STEAM_WEBAPI_RPS` | 2 请求/秒 |
-| `STEAM_STORE_RPS` | 0.5 请求/秒 |
-| `STEAM_FAMILY_RPS` | 0.5 请求/秒，额外服从 Web API 域名限制 |
-| 连接/读取/写入/连接池超时 | 10 / 20 / 10 / 10 秒 |
-| `STEAM_MAX_ATTEMPTS` | 3，包含首次请求 |
-| `STEAM_REQUEST_DEADLINE_SECONDS` | 60 秒，从首次真正发送开始 |
-| 本地退避基数/上限 | 1 / 30 秒 |
-| `STEAM_STOP_GRACE_SECONDS` | 5 秒 |
-| `STEAM_PROGRESS_INTERVAL_SECONDS` | 5 秒 |
+| 参数                                |                                   默认 |
+| ----------------------------------- | -------------------------------------: |
+| `STEAM_MAX_CONCURRENCY`           |                 4 个真实 HTTP 在途请求 |
+| `STEAM_WEBAPI_RPS`                |                              2 请求/秒 |
+| `STEAM_STORE_RPS`                 |                            0.5 请求/秒 |
+| `STEAM_FAMILY_RPS`                | 0.5 请求/秒，额外服从 Web API 域名限制 |
+| 连接/读取/写入/连接池超时           |                   10 / 20 / 10 / 10 秒 |
+| `STEAM_MAX_ATTEMPTS`              |                        3，包含首次请求 |
+| `STEAM_REQUEST_DEADLINE_SECONDS`  |              60 秒，从首次真正发送开始 |
+| 本地退避基数/上限                   |                              1 / 30 秒 |
+| `STEAM_STOP_GRACE_SECONDS`        |                                   5 秒 |
+| `STEAM_PROGRESS_INTERVAL_SECONDS` |                                   5 秒 |
 
 完整变量名见 `.env.example`。这些值是保守工程默认值，不是 Valve 公布的限额。首次发送前的排队不消耗逻辑请求预算；后续排队、重试和退避计入预算。429 对对应域名实施共享冷却，兼容秒数和日期 Retry-After；服务端等待不被本地上限缩短。等待过长会结束本次请求但保留冷却。认证、证书及结构错误不盲目重试，TLS 始终校验，不自动跟随重定向。
 
@@ -279,17 +313,17 @@ SIGINT/SIGTERM 或 `steamtool stop` 会停止新派发、唤醒限速与重试�
 
 错误对象包含 code、来源、scope、API/AppID/目标主体、错误 ID、HTTP/上游状态和安全消息。不会把 403 推测成某种具体隐私设置，也不把失败转成空清单。
 
-| 错误码 | 含义与处理 |
-|---|---|
-| `CONFIG_INVALID` / `TOOL_NOT_FOUND` | 配置、参数或调用问题；修正后重试命令 |
-| `AUTH_REQUIRED` / `AUTH_EXPIRED` | 本地缺凭据或明确过期；更新本地配置 |
-| `ACCESS_DENIED` | 上游拒绝或身份不符；不自动重试 |
-| `NETWORK_TIMEOUT` / `NETWORK_ERROR` | 有限重试；证书错误不关闭 TLS |
-| `RATE_LIMITED` / `UPSTREAM_UNAVAILABLE` | 共享冷却或有限退避 |
-| `REQUEST_DEADLINE_EXCEEDED` | 逻辑请求预算耗尽，不提前违反冷却 |
-| `RESPONSE_INVALID` / `DATA_UNAVAILABLE` | 结构或数据缺失，保留未知状态 |
+| 错误码                                         | 含义与处理                                |
+| ---------------------------------------------- | ----------------------------------------- |
+| `CONFIG_INVALID` / `TOOL_NOT_FOUND`        | 配置、参数或调用问题；修正后重试命令      |
+| `AUTH_REQUIRED` / `AUTH_EXPIRED`           | 本地缺凭据或明确过期；更新本地配置        |
+| `ACCESS_DENIED`                              | 上游拒绝或身份不符；不自动重试            |
+| `NETWORK_TIMEOUT` / `NETWORK_ERROR`        | 有限重试；证书错误不关闭 TLS              |
+| `RATE_LIMITED` / `UPSTREAM_UNAVAILABLE`    | 共享冷却或有限退避                        |
+| `REQUEST_DEADLINE_EXCEEDED`                  | 逻辑请求预算耗尽，不提前违反冷却          |
+| `RESPONSE_INVALID` / `DATA_UNAVAILABLE`    | 结构或数据缺失，保留未知状态              |
 | `OUTPUT_WRITE_FAILED` / `LOG_WRITE_FAILED` | 保存/监督失败；停止派发并尽力保留部分结果 |
-| `INTERNAL_ERROR` | 未预期程序问题；记录脱敏栈位置并终止 |
+| `INTERNAL_ERROR`                             | 未预期程序问题；记录脱敏栈位置并终止      |
 
 `doctor` 检查配置是否存在、凭据是否配置、输出可写性、显式工具注册表，以及一个公开商店探测。有 Key/SteamID 时加用户资料探测，有 token/SteamID 时加家庭组探测，不自动遍历所有工具。配置齐全仅表示可尝试，不保证账号权限或完整性。
 

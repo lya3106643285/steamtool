@@ -62,10 +62,10 @@ def test_family_truncation_and_expired_token():
         assert result.data['potentially_truncated'] is True and result.data['complete'] is False
         executor.config = replace(config, family_token='opaque')
         invalid = await registry.call('get_family_group_for_user', {'steamid': ME})
-        assert invalid.state == 'unavailable' and len(calls) == 1
+        assert invalid.state == 'failed' and len(calls) == 1
         expired = 'fixture.' + base64.urlsafe_b64encode(json.dumps({'sub': ME, 'exp': 0}).encode()).decode().rstrip('=') + '.fixture'
         executor.config = replace(config, family_token=expired)
-        expired_result = await registry.call('get_family_group_for_user', {'steamid': ME})
+        expired_result = await build_registry(executor).call('get_family_group_for_user', {'steamid': ME})
         assert expired_result.error['code'] == 'AUTH_EXPIRED' and len(calls) == 1
         await executor.close()
     asyncio.run(check())
@@ -75,7 +75,7 @@ def test_protocol_application_failure_with_empty_items():
     async def check():
         executor = Executor(Config(), transport=httpx.MockTransport(lambda r: httpx.Response(200, json={'response': {'success': False, 'items': []}})))
         result = await build_registry(executor).call('get_wishlist', {'steamid': ME})
-        assert result.state == 'unavailable' and result.attempts == 1
+        assert result.state == 'data_unavailable' and result.attempts == 1
         await executor.close()
     asyncio.run(check())
 

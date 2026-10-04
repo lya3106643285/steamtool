@@ -1,0 +1,5 @@
+{
+    "python.terminal.activateEnvironment": false,
+    "python.terminal.activateEnvInCurrentTerminal": false,
+    "python.defaultInterpreterPath": "${env:HOME}/miniconda3/envs/steamtool/bin/python"
+}

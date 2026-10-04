@@ -6,8 +6,14 @@ from steamtool.Ports.request_executor import RequestSpec, object_at
 async def call(executor, params, context):
     def decode(body):
         stats = object_at(body, "playerstats")
-        if str(stats.get("steamID", "")) != params["steamid"]:
-            raise Failure("DATA_UNAVAILABLE", "Player stats identity unavailable or mismatched")
+        if stats.get("success") is False:
+            if stats.get("error") == "Requested app has no stats":
+                raise Failure("CAPABILITY_NOT_APPLICABLE", "Requested app has no stats")
+            raise Failure("DATA_UNAVAILABLE", "Player stats are unavailable")
+        if "steamID" not in stats:
+            raise Failure("DATA_UNAVAILABLE", "Player stats identity unavailable")
+        if str(stats["steamID"]) != params["steamid"]:
+            raise Failure("RESPONSE_INVALID", "Player stats identity mismatched")
         if not isinstance(stats.get("stats"), list):
             raise Failure("DATA_UNAVAILABLE", "No explicit player statistics list")
         items = []
@@ -17,4 +23,4 @@ async def call(executor, params, context):
             items.append({"name": row["name"], "value": row["value"]})
         return dict(items=items, subject_steamid=params["steamid"], complete=True)
     return await executor.execute(RequestSpec("get_user_stats_for_game", "https://api.steampowered.com/ISteamUserStats/GetUserStatsForGame/v2/",
-        {"appid": params["appid"], "steamid": params["steamid"]}, "user_key"), decode, context)
+        {"appid": params["appid"], "steamid": params["steamid"]}, "user_key", decode_bad_request=True), decode, context)

@@ -20,7 +20,8 @@ async def collect_accounts(registry, config, document, runtime, *, player_data=T
     async def get(key, name, params):
         result = await registry.call(name, params)
         collections[key] = result
-        add_result(document, key, result, request_scope=result.data.get("request_scope"))
+        add_result(document, key, result, request_scope=result.data.get("request_scope"),
+                   potentially_truncated=result.data.get("potentially_truncated"))
         # Publish each completed collection immediately so cancellation preserves its IDs.
         if document["meta"]["feature"] == "library":
             existing = {item["appid"]: item for item in document["data"]["items"]}
@@ -133,33 +134,65 @@ def merge_achievements(schema, player, subject):
             items.append(dict(apiname=name, display_name=None, description=None, unlocked=bool(value["achieved"]), unlock_time=value.get("unlocktime")))
     total = len(definitions) if schema.state == "ok" else None
     unlocked = sum(a["unlocked"] is True for a in items) if complete else 0 if no_achievements else None
-    return block("not_applicable" if no_achievements else "ok" if complete else "unavailable" if not items else "partial",
+    state = ("not_applicable" if no_achievements or player.state == "not_applicable" else "ok" if complete
+             else "failed" if player.state == "failed" else "data_unavailable")
+    return block(state,
         source=[schema.source, player.source], fetched_at={"schema": schema.fetched_at, "player": player.fetched_at},
         subject_steamid=subject, total=total, unlocked=unlocked,
-        completion_ratio=unlocked / total if complete and total else None, items=sorted(items, key=lambda a: a["apiname"]))
+        completion_ratio=unlocked / total if complete and total else None, items=sorted(items, key=lambda a: a["apiname"]),
+        error_id=(player.error or schema.error or {}).get("error_id"))
 
 
 async def enrich_player(registry, config, document, item):
     context = {"task_id": f"app-{item['appid']}"}
+    registry.executor.event("enrichment_decision", appid=item["appid"], operation="schema", decision="scheduled", reason="capability discovery", **context)
     schema = await registry.call("get_schema_for_game", {"appid": item["appid"], "language": config.language}, context)
     add_result(document, f"schema:{item['appid']}", schema)
-    # An explicit empty definition avoids a pointless player-achievements request.
-    if schema.state == "ok" and schema.data.get("achievements") == []:
-        player = Result("not_applicable", {"items": []}, source="get_player_achievements")
-    else:
-        player = await registry.call("get_player_achievements", {"appid": item["appid"], "steamid": config.steamid, "language": config.language}, context)
-    add_result(document, f"achievements:{item['appid']}", player)
-    item["achievements"] = merge_achievements(schema, player, config.steamid)
-    stats = await registry.call("get_user_stats_for_game", {"appid": item["appid"], "steamid": config.steamid}, context)
-    add_result(document, f"stats:{item['appid']}", stats)
-    item["stats"] = block(stats.state, stats.source, stats.fetched_at, subject_steamid=config.steamid,
-                          items=stats.data.get("items", []), error_id=stats.error["error_id"] if stats.error else None)
+    registry.executor.event("operation_finished", api=schema.source, appid=item["appid"],
+                            operation_id=f"schema:{item['appid']}", outcome=schema.outcome, **context)
+
+    async def downstream(operation, api):
+        # Only a validated complete schema is negative capability evidence.
+        definitions = schema.data.get(operation)
+        verified = schema.state == "ok" and schema.data.get("complete") is True and isinstance(definitions, list)
+        if verified and definitions:
+            decision, reason = "scheduled", "schema contains definitions"
+            params = dict(appid=item["appid"], steamid=config.steamid)
+            if operation == "achievements":
+                params["language"] = config.language
+            registry.executor.event("enrichment_decision", appid=item["appid"], operation=operation,
+                                    decision=decision, reason=reason, **context)
+            result = await registry.call(api, params, context)
+        else:
+            state = "not_applicable" if verified or schema.state == "not_applicable" else "data_unavailable"
+            decision = "skipped_not_applicable" if state == "not_applicable" else "skipped_dependency"
+            reason = "schema explicitly has no definitions" if verified else "schema capability unavailable"
+            error = None
+            if state == "data_unavailable":
+                error = Failure("DEPENDENCY_FAILED", "Schema evidence unavailable; downstream request not scheduled",
+                                api=api, appid=item["appid"], subject_steamid=config.steamid).info
+            result = Result(state, {"items": [], "complete": state == "not_applicable"}, error=error, source=api)
+            registry.executor.event("enrichment_decision", appid=item["appid"], operation=operation,
+                                    decision=decision, reason=reason, capability=False if verified else "unknown",
+                                    dependency_error_id=schema.error["error_id"] if schema.error else None, **context)
+        add_result(document, f"{operation}:{item['appid']}", result)
+        registry.executor.event("operation_finished", api=api, appid=item["appid"],
+                                operation_id=f"{operation}:{item['appid']}", outcome=result.outcome, **context)
+        if operation == "achievements":
+            item[operation] = merge_achievements(schema, result, config.steamid)
+        else:
+            item[operation] = block(result.state, result.source, result.fetched_at, subject_steamid=config.steamid,
+                                    items=result.data.get("items", []), error_id=result.error["error_id"] if result.error else None)
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(downstream("achievements", "get_player_achievements"))
+        tasks.create_task(downstream("stats", "get_user_stats_for_game"))
 
 
 async def enrich_items(registry, config, document, runtime, *, player_data):
     items = document["data"]["items"]
     if runtime:
         runtime.total = len(items)
+        runtime.enrichment_plan["input_apps"] = len(items)
         runtime.event("phase_started", phase="enrichment")
     started = time.monotonic()
     queue = asyncio.Queue()
@@ -177,9 +210,11 @@ async def enrich_items(registry, config, document, runtime, *, player_data):
                     if player_data:
                         tasks.create_task(enrich_player(registry, config, document, item))
                 if runtime:
-                    failed = any(document["coverage"].get(f"{source}:{item['appid']}", {}).get("state") == "unavailable"
-                                 for source in ("store", "schema", "achievements", "stats"))
-                    runtime.task(task_id, "failed" if failed else "success", appid=item["appid"])
+                    outcomes = {c["outcome"] for source in ("store", "schema", "achievements", "stats")
+                                if (c := document["coverage"].get(f"{source}:{item['appid']}"))}
+                    # One App = one task. Prefer the most consequential completed outcome.
+                    outcome = next((s for s in ("failed", "data_unavailable", "success", "not_applicable") if s in outcomes), "data_unavailable")
+                    runtime.task(task_id, outcome, appid=item["appid"])
             except asyncio.CancelledError:
                 if runtime and not runtime.failed:
                     runtime.task(task_id, "cancelled", appid=item["appid"])
@@ -200,11 +235,18 @@ async def enrich_items(registry, config, document, runtime, *, player_data):
 
 
 def finish_status(document, primary_ok):
-    incomplete = any(c.get("state") in {"unavailable", "partial"} or c.get("complete") is False for c in document["coverage"].values())
+    coverage = document["coverage"]
+    if document["meta"]["feature"] == "library":
+        # Experimental Family completeness remains visible, but is not itself a failure.
+        incomplete = any(coverage.get(key, {}).get("state") not in {"ok", "not_applicable"} for key in ("owned", "family"))
+        incomplete |= coverage.get("owned", {}).get("complete") is False
+        incomplete |= bool(coverage.get("family", {}).get("potentially_truncated"))
+    else:
+        incomplete = any(c.get("state") in {"unavailable", "partial", "data_unavailable", "failed"} or c.get("complete") is False for c in coverage.values())
     incomplete = incomplete or any(
-        item[name]["state"] in {"partial", "unavailable"}
+        item[name]["state"] in {"partial", "unavailable", "data_unavailable", "failed"}
         for item in document["data"]["items"]
-        for name in ("ownership", "store", "achievements", "stats"))
+        for name in (("ownership",) if document["meta"]["feature"] == "library" else ("ownership", "store", "achievements", "stats")))
     document["status"] = "failed" if not primary_ok else "partial" if incomplete else "ok"
     items = document["data"]["items"]
     times = [item["playtime"]["total_minutes"] for item in items]
@@ -230,4 +272,4 @@ async def run(registry, config, document, runtime):
         document["data"]["items"].append(item)
         index_app(document, appid, item["name"], "library collections")
     await enrich_items(registry, config, document, runtime, player_data=True)
-    finish_status(document, bool(candidates) or collections["owned"].state == "ok" or collections["family"].state == "ok")
+    finish_status(document, collections["owned"].state == "ok" or collections["family"].state == "ok")

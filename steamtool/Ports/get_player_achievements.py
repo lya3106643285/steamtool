@@ -7,7 +7,7 @@ async def call(executor, params, context):
         stats = object_at(body, "playerstats")
         if stats.get("success") is False:
             if stats.get("error") == "Requested app has no stats":
-                return {"_state": "not_applicable", "items": [], "complete": True}
+                raise Failure("CAPABILITY_NOT_APPLICABLE", "Requested app has no stats")
             raise Failure("DATA_UNAVAILABLE", "Player achievements are unavailable")
         if stats.get("success") is not True or not isinstance(stats.get("achievements"), list):
             raise Failure("RESPONSE_INVALID", "Achievement response incomplete")
@@ -21,4 +21,4 @@ async def call(executor, params, context):
         return dict(items=[selected(a, ("apiname", "achieved", "unlocktime")) for a in items], complete=True,
                     subject_steamid=params["steamid"])
     return await executor.execute(RequestSpec("get_player_achievements", "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/",
-        {"appid": params["appid"], "steamid": params["steamid"], "l": params["language"]}, "user_key"), decode, context)
+        {"appid": params["appid"], "steamid": params["steamid"], "l": params["language"]}, "user_key", decode_bad_request=True), decode, context)

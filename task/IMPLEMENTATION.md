@@ -171,3 +171,50 @@ SteamDB 扩展公开实现复核支持明确 exclude_reason=0 为无排除；未
 真实接口证据提供四类样本：本人持有且有本人时长 79、本人不持有但有借玩时长 12、本人不持有且可共享但没有本人时长记录 83、本人不持有且被排除 7。无时长证据不等于从未玩过；人工 Steam 客户端对照仍未完成。
 
 验证业务 JSON 中全部记录进入 id_map，个人指标主体一致，Key/token 未写入输出；结果和额外审计报告留在 ~/.steamtool/Outputs，不提交私人 ID/名称/响应。README 和验收矩阵更新真实验证范围，仅提交安全汇总及说明，不修改业务实现。原有用户 README 排版和任务书移动继续保留。
+
+## 2026-10-04：V1.1 工程优化补丁
+
+本轮按 `Steam_Tool_V1.1_Optimization_Patch_Spec.md` 修正状态语义、依赖调度、运行内去重和监督统计。Family 两个 adapter、token 验证方式、ownership 合并、start/stop、并发/限速配置均沿用既有实现。没有新业务能力、数据库或跨运行缓存；保留用户已有 README 修改和任务书移动。
+
+| 修改文件 | 目的与关键行为 |
+| --- | --- |
+| `steamtool/error_handler.py` | 将错误码映射与重试决策分开；明确 capability/data/failed；未解释的 HTTP 400 和所有 5xx 属于真正失败，401 为认证过期 |
+| `steamtool/Ports/request_executor.py` | Result 暴露 outcome；兼容成功 state=ok；只允许指定 adapter 解码 HTTP 400 的结构化应用错误；统计终态及 HTTP 状态，不将重试历史当最终失败 |
+| `steamtool/Ports/get_schema_for_game.py` | 校验 achievements 与 stats 定义，暴露 capability；缺 schema 为 data_unavailable，损坏结构为 failed |
+| `steamtool/Ports/get_player_achievements.py` | 明确无 stats 的结构化响应归为 capability 不适用；其余应用错误为数据不可用，损坏响应为失败 |
+| `steamtool/Ports/get_user_stats_for_game.py` | 同上；响应主体不匹配归 RESPONSE_INVALID，保留所有成功统计数据 |
+| `steamtool/Ports/registry.py` | 在原 single-flight 上共享全部终态结果，避免失败后再次调用重发；首个调用者取消不丢共享结果，不改注册结构 |
+| `steamtool/scripts/library.py` | schema 驱动条件调度，两个下游独立并行；无证据为 unknown/data_unavailable；一个 App 一个 task；主状态按核心 collection/ownership 判定 |
+| `steamtool/scripts/game.py` | 共享块与 coverage 增加 outcome；商店补充记录独立 planner/operation；not_applicable 不进入业务 errors |
+| `steamtool/scripts/runtime_debug.py` | task 四种完成结果独立统计，新增 operations、http_by_api、enrichment_plan；decision 日志关联 App、操作、理由及依赖错误 |
+| `steamtool/scripts/persistence.py` | schema_version 升至 1.1.0，保留 envelope、字段和原子写入机制 |
+| `tests/test_v11.py` | 新增 37 项状态、依赖、并发、去重、Family、字段和取消契约测试，全部使用合成数据 |
+| `tests/test_accounts.py` | 将明确上游无数据的断言改为 data_unavailable，保留认证与编码检查 |
+| `tests/test_executor.py` | HTTP 不重试测试同时验证真正失败与 404 数据不可用的完成结果 |
+| `tests/test_acceptance_edges.py` | 调整完成状态；更换凭据的模拟场景使用独立 Registry，保留过期与截断回归 |
+| `tests/test_workflows.py` | fixture 增加 stats 能力证据；缺商店数据与不完整响应的断言按新分类验证 |
+| `README.md` | 更新 schema_version、成功兼容字段、调度、主状态、运行指标及真实性能边界 |
+| `task/ACCEPTANCE.md` | 分别记录单元、MockTransport、真实 Steam 验收、benchmark 和未验证范围 |
+| `task/IMPLEMENTATION.md` | 逐文件记录补丁行为、实际依赖图、状态兼容、实现约束与交付范围 |
+
+实际依赖图如下，每个 App 独立推进，仍由统一 Executor 控制发送、并发、限速、冷却和重试：
+
+```text
+collection → AppID 合并/去重 → 并发 App worker
+    ├─ store → 合并商店详情
+    └─ schema → 有成就定义？ → player achievements
+              → 有 stats 定义？ → user stats
+              → 明确空定义：not_applicable，不发下游请求
+              → schema 不可用/失败：data_unavailable + DEPENDENCY_FAILED，能力 unknown
+    → 合并 → App outcome → 持久化
+```
+
+schema 接口同时返回 stats 和 achievements 定义的用途由 [Valve ISteamUserStats 文档](https://partner.steamgames.com/doc/webapi/ISteamUserStats?l=english) 支持。有效 availableGameStats 缺某类列表按该完整 schema 中的空定义处理；整个 schema 缺失不推断没有能力。未经验证的数字 app_type 和游戏名称不参与跳过。
+
+成功块保留 state=ok，新增 outcome=success；state 的 not_applicable、data_unavailable、failed 对应同名 outcome。task 按其操作结果 failed > data_unavailable > success > not_applicable 汇总，not_applicable 本身不使含成功操作的 App 失败。operations 包括已跳过的逻辑操作，HTTP 计数只包括实际请求；三者不能互相等同。数据不可用允许 errors/event 说明，capability 不适用不计业务 error。
+
+离线验证：项目 Conda 环境完整 111 项通过；新增纯单元契约 19 项、MockTransport 契约 18 项，另保留原有 74 项。Python 编译、Shell 语法、pip check 和 diff 检查通过。真实 benchmark 的单独结果见后续验收记录。
+
+性能边界：仍要查询 419 个 Store 条目时，在原 store_rps=0.5 下发送间隔最低约 836 秒。减少 Web API 无意义请求并不保证 wall time 同比例减少；本轮不调高速率、不改成串行，也不新增复杂类型判定以绕过这一限制。
+
+真实验收已完成：run_id=29c6dae6fff1，schema_version=1.1.0，419 App、1157 logical/HTTP attempts、App outcome success 148/not_applicable 0/data_unavailable 270/failed 1，wall 840.671880 s、enrichment 837.084593 s。请求数下降 511（30.64%），耗时基本持平，Store 限速仍是瓶颈。独立 not_applicable operation 140，不能与 App outcome 的 0 混为同一口径。Family 及所有 AppID/ownership 字段与基线一致，原成功时长/成就/stats/Store 块没有丢失；唯一 ACCESS_DENIED 与基线同请求。顶层 partial 是保留既有 ownership 未知值的结果。完整 benchmark、实际样本、未验证项及安装版 CLI 的范围见 `task/ACCEPTANCE.md` 和 README 的 V1.1 章节。

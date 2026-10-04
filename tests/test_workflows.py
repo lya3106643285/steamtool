@@ -43,7 +43,7 @@ class Fixtures:
         elif "GetWishlist" in path:
             body = {"response": {"items": self.wishes}}
         elif "GetSchemaForGame" in path:
-            body = {"game": {"availableGameStats": {"achievements": [{"name": "ACH", "displayName": "成就"}]}}}
+            body = {"game": {"availableGameStats": {"achievements": [{"name": "ACH", "displayName": "成就"}], "stats": [{"name": "score"}]}}}
         elif "GetPlayerAchievements" in path:
             assert params["steamid"] == ME
             body = {"playerstats": {"success": True, "achievements": [{"apiname": "ACH", "achieved": 1, "unlocktime": 123}]}}
@@ -88,7 +88,7 @@ def test_library_semantics():
     assert items[4]["ownership"]["available_via_family"] is True
     assert items[5]["ownership"]["available_via_family"] is None
     assert items[1]["achievements"]["completion_ratio"] == 1
-    assert document["status"] == "partial"  # Experimental family completeness is unknown.
+    assert document["status"] == "partial"  # Ownership of some candidates remains unknown.
     assert set(document["id_map"]) == {str(i) for i in items}
     assert all(isinstance(v, list) for v in document["name_index"].values())
 
@@ -101,7 +101,7 @@ def test_wishlist_preserves_missing_details_and_duplicates():
     assert [i["appid"] for i in document["data"]["items"]] == [1, 99]
     assert document["coverage"]["wishlist"]["complete"] is False
     assert len(document["data"]["items"][1]["wishlist"]["entries"]) == 2
-    assert document["data"]["items"][1]["store"]["state"] == "unavailable"
+    assert document["data"]["items"][1]["store"]["state"] == "data_unavailable"
     assert document["id_map"]["99"]["canonical_name"] is None
 
 
@@ -127,7 +127,7 @@ def test_wishlist_200_is_not_automatically_empty(body):
     async def check():
         ex = Executor(Config(), transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body)))
         result = await build_registry(ex).call("get_wishlist", {"steamid": ME})
-        assert result.state == "unavailable" and result.data == {}
+        assert result.state in {"data_unavailable", "failed"} and result.data == {}
         await ex.close()
     asyncio.run(check())
 

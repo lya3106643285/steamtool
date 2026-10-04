@@ -67,10 +67,26 @@ def decide(error, *, attempt, remaining, config, scope, jitter=.5, read_only=Tru
 
 
 def classify_http(status, retry_after=None):
-    code = ("RATE_LIMITED" if status == 429 else "ACCESS_DENIED" if status in {401, 403}
-            else "UPSTREAM_UNAVAILABLE" if status in {500, 502, 503, 504} else "DATA_UNAVAILABLE")
+    code = ("RATE_LIMITED" if status == 429 else "AUTH_EXPIRED" if status == 401
+            else "ACCESS_DENIED" if status == 403 else "UPSTREAM_UNAVAILABLE" if 500 <= status < 600
+            else "DATA_UNAVAILABLE" if status in {404, 410} else "RESPONSE_INVALID")
     return Failure(code, "HTTP request failed", source="http", http_status=status,
                    retry_after=retry_after_seconds(retry_after))
+
+
+def error_outcome(error):
+    """Recovery policy and completed outcome are independent of each other."""
+    code = error.get("code") if isinstance(error, dict) else error.code
+    return ("not_applicable" if code == "CAPABILITY_NOT_APPLICABLE" else
+            "data_unavailable" if code in {"DATA_UNAVAILABLE", "DEPENDENCY_FAILED"} else "failed")
+
+
+def result_outcome(state, error=None):
+    if state in {"ok", "success"}:
+        return "success"
+    if state in {"not_applicable", "data_unavailable", "failed", "cancelled"}:
+        return state
+    return error_outcome(error) if error else "data_unavailable"
 
 
 def classify_transport(exc):

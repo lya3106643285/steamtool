@@ -101,7 +101,7 @@ def test_nonretry_http(status):
     async def check():
         ex = Executor(Config(), transport=httpx.MockTransport(lambda r: httpx.Response(status)))
         result = await ex.execute(SPEC, lambda b: b)
-        assert result.attempts == 1 and result.state == "unavailable"
+        assert result.attempts == 1 and result.outcome == ("data_unavailable" if status == 404 else "failed")
         await ex.close()
     asyncio.run(check())
 

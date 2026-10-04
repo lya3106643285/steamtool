@@ -1,4 +1,4 @@
-"""Explicit registration, validation, auth checks, successful run cache/single-flight."""
+"""Explicit registration, validation, auth checks and terminal run cache/single-flight."""
 import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
@@ -75,18 +75,21 @@ class Registry:
                         result = await tool.callable(self.executor, params, context)
                         if result.error:
                             result.error.update(api=name, appid=params.get("appid"), subject_steamid=params.get("steamid"))
+                        self.cache[key] = deepcopy(result)
                         return result
                     except Failure as exc:
                         if exc.code in {"INTERNAL_ERROR", "LOG_WRITE_FAILED"}:
                             raise
                         exc.info.update(api=name, appid=params.get("appid"), subject_steamid=params.get("steamid"))
-                        return Result("unavailable", error=exc.info, source=name)
+                        result = Result("unavailable", error=exc.info, source=name)
+                        self.cache[key] = deepcopy(result)
+                        return result
                 self.inflight[key] = asyncio.create_task(invoke())
             task = self.inflight[key]
             try:
                 result = deepcopy(await asyncio.shield(task))
-                if result.state in {"ok", "not_applicable"}:
-                    self.cache[key] = deepcopy(result)
+                # invoke caches terminal results even if its first subscriber is cancelled.
+                # Retries remain entirely inside Executor; a second caller cannot resend.
             finally:
                 if task.done():
                     self.inflight.pop(key, None)

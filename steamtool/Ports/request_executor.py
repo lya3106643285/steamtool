@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import uuid
 
 import httpx
-from steamtool.error_handler import Failure, decide, classify_http, classify_transport
+from steamtool.error_handler import Failure, decide, classify_http, classify_transport, error_outcome, result_outcome
 
 
 @dataclass
@@ -21,8 +21,16 @@ class Result:
     attempts: int = 0
     from_run_cache: bool = False
 
+    def __post_init__(self):
+        if self.state == "unavailable":
+            self.state = error_outcome(self.error) if self.error else "data_unavailable"
+
+    @property
+    def outcome(self):
+        return result_outcome(self.state, self.error)
+
     def as_dict(self):
-        return asdict(self)
+        return dict(asdict(self), outcome=self.outcome)
 
 
 @dataclass(frozen=True)
@@ -32,6 +40,8 @@ class RequestSpec:
     params: dict = field(default_factory=dict)
     auth_kind: str = "none"
     family: bool = False
+    # Only adapters with a validated application-error contract may decode HTTP 400.
+    decode_bad_request: bool = False
 
 
 def object_at(body, key):
@@ -152,6 +162,7 @@ class Executor:
         last = None
         while attempts < self.config.max_attempts:
             acquired = False
+            status = None
             try:
                 if spec.auth_kind in self.disabled_auth:
                     raise Failure(self.disabled_auth[spec.auth_kind], "Authentication source disabled for this run")
@@ -172,7 +183,7 @@ class Executor:
                     self.semaphore.release()
                     acquired = False
                     status = response.status_code
-                    if status != 200:
+                    if status != 200 and not (status == 400 and spec.decode_bad_request):
                         raise classify_http(status, response.headers.get("retry-after"))
                     check_upstream(response)
                     try:
@@ -180,9 +191,12 @@ class Executor:
                     except (ValueError, UnicodeError):
                         raise Failure("RESPONSE_INVALID", "Invalid JSON response") from None
                     data = decode(body)
+                    if status != 200:
+                        raise classify_http(status)
                     state = data.pop("_state", "ok")
                     self.event("request_succeeded", module=__name__, attempt=attempts, http_status=status,
-                               duration_ms=(self.clock() - start) * 1000, **context)
+                               outcome=result_outcome(state), duration_ms=(self.clock() - start) * 1000, **context)
+                    self.event("request_finished", module=__name__, outcome=result_outcome(state), **context)
                     return Result(state, data, source=spec.api,
                                   fetched_at=datetime.now(timezone.utc).isoformat(), attempts=attempts)
             except asyncio.CancelledError:
@@ -201,11 +215,15 @@ class Executor:
                 if acquired:
                     self.semaphore.release()
             last.info.update(api=spec.api, appid=context.get("appid"), subject_steamid=context.get("subject_steamid"))
+            if last.info["http_status"] is None:
+                last.info["http_status"] = status
             if last.code == "LOG_WRITE_FAILED":
                 raise last
             if last.code == "AUTH_EXPIRED":
                 self.disabled_auth[spec.auth_kind] = last.code
-            self.event("request_failed", module=__name__, level="WARNING", attempt=attempts,
+            benign = error_outcome(last) in {"not_applicable", "data_unavailable"}
+            self.event("request_unavailable" if benign else "request_failed", module=__name__,
+                       level="INFO" if benign else "WARNING", attempt=attempts,
                        error_code=last.code, error_id=last.info["error_id"], http_status=last.info["http_status"], **context)
             remaining = self.config.deadline - (self.clock() - first_send) if first_send is not None else self.config.deadline
             decision = decide(last, attempt=max(1, attempts), remaining=remaining, config=self.config, scope=host, jitter=self.jitter())
@@ -214,6 +232,8 @@ class Executor:
                 self.event("cooldown_started", module=__name__, cooldown_scope=host, retry_wait_ms=decision.wait_seconds * 1000, **context)
             if decision.action not in {"retry", "cooldown_then_retry"}:
                 if decision.action == "abort_run":
+                    self.event("request_finished", module=__name__, outcome="failed", error_code=last.code,
+                               error_id=last.info["error_id"], **context)
                     raise last
                 if decision.reason == "request budget exhausted":
                     last = Failure("REQUEST_DEADLINE_EXCEEDED", "Retry exceeds budget; last cause: " + last.code,
@@ -221,7 +241,9 @@ class Executor:
                 break
             self.event("retry_scheduled", module=__name__, attempt=attempts, retry_wait_ms=decision.wait_seconds * 1000, **context)
             await self.pause(decision.wait_seconds)
-        return Result("unavailable", error=last.info, source=spec.api, attempts=attempts)
+        self.event("request_finished", module=__name__, outcome=error_outcome(last),
+                   error_code=last.code, error_id=last.info["error_id"], **context)
+        return Result(error_outcome(last), error=last.info, source=spec.api, attempts=attempts)
 
     async def close(self):
         await self.client.aclose()

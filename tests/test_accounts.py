@@ -38,7 +38,7 @@ def test_accounts_and_encoding():
         owned = await registry.call("get_owned_games", {"steamid": ME, "include_family_licenses": False})
         assert owned.data["items"][0]["playtime_forever"] == 0 and owned.data["complete"]
         achievements = await registry.call("get_player_achievements", {"steamid": ME, "appid": 1, "language": "english"})
-        assert achievements.state == "unavailable"
+        assert achievements.state == "data_unavailable"
         schema = await registry.call("get_schema_for_game", {"appid": 1, "language": "english"})
         assert schema.data["achievements"] == []
         family = await registry.call("get_family_group_for_user", {"steamid": ME})
