@@ -218,3 +218,29 @@ schema 接口同时返回 stats 和 achievements 定义的用途由 [Valve IStea
 性能边界：仍要查询 419 个 Store 条目时，在原 store_rps=0.5 下发送间隔最低约 836 秒。减少 Web API 无意义请求并不保证 wall time 同比例减少；本轮不调高速率、不改成串行，也不新增复杂类型判定以绕过这一限制。
 
 真实验收已完成：run_id=29c6dae6fff1，schema_version=1.1.0，419 App、1157 logical/HTTP attempts、App outcome success 148/not_applicable 0/data_unavailable 270/failed 1，wall 840.671880 s、enrichment 837.084593 s。请求数下降 511（30.64%），耗时基本持平，Store 限速仍是瓶颈。独立 not_applicable operation 140，不能与 App outcome 的 0 混为同一口径。Family 及所有 AppID/ownership 字段与基线一致，原成功时长/成就/stats/Store 块没有丢失；唯一 ACCESS_DENIED 与基线同请求。顶层 partial 是保留既有 ownership 未知值的结果。完整 benchmark、实际样本、未验证项及安装版 CLI 的范围见 `task/ACCEPTANCE.md` 和 README 的 V1.1 章节。
+
+## 2026-10-07：正式数据契约与批量 Games
+
+依据 `Steam_Tool_Codex_Task.md` 及 docs 下三份输入设计文档实现；两份数据契约输入资料和运行逻辑说明原样保留。正式有效规范为 `docs/data_contract.md`，SCHEMA_VERSION=2.0.0。软件包版本独立，旧 game/doctor 的 1.1.0 外壳和历史结果保留。
+
+| 文件 | 本轮职责 |
+| --- | --- |
+| `schema/base.py` | 12 个要求的基础模型及共享 PriceValue；Meta 五种状态；严格保留 null/false/0/-1；字符串字典 key；Bundle price 无 Meta |
+| `schema/feature.py` | Run、三个 Record/Result、Summary、排行、Coverage；统一状态聚合和根级错误引用验证 |
+| `schema/model.py`、`schema/version.py` | dataclass 类型校验与递归序列化；正式/旧格式版本集中管理；没有新增依赖 |
+| `steamtool/contracts.py` | 把已有来源证据适配到正式外壳；仅输出各 Feature 要求的字段 |
+| `steamtool/input_parser.py` | quoted CSV-style 名称解析；六类输入错误和项定位；COLLECTING_INPUT/CORRECTING_ITEM 状态机 |
+| `steamtool/main.py` | games CLI 与多行收集；输入错误停留 CLI；明细/Top-N 参数；正式结果保存与取消/日志失败回写 |
+| `steamtool/scripts/game.py` | 批量名称复用现有精确解析和查询；未解析目标只记录业务错误；重复明确 AppID 合并 |
+| `steamtool/scripts/library.py` | 默认跳过玩家完整成就明细；Library 不请求 Store/Stats；保留集合来源与已知名称；正面 schema 不被玩家记录缺失推翻 |
+| 配置模板、`config.py`、`pyproject.toml` | Top-N 默认 10，支持 0 和本次参数覆盖；wheel 包含 schema 包 |
+
+设计输入的 UTC 时间说明与本次会话先前明确的北京时间输出要求不同；保留已经生效的 UTC+8、北京时间文件名和原始 Unix timestamp，正式规范明确此处理。
+
+现有来源没有已验证的独立成就解锁汇总接口，默认只保留已知 total，unlocked/completion_ratio 为 null、Meta.partial；不为填汇总暗中查询完整列表。显式 --achievements 后复用已有玩家成就接口计算汇总和填入明细。确认无系统时使用成对 -1、null 明细和 not_applicable；查询失败保留 Record 和根级错误引用。
+
+Bundle 来源、地区购买/获取资格、多拥有者昵称映射仍未定义，适配层保留 TODO、unavailable/null。平台零时间只有在支持信息已确认时才映射为 0；明确不支持才映射为 -1。没有新增 API、爬虫、缓存或运行框架。
+
+新增 67 个参数化测试用例，完整离线验证 **181 passed in 25.40s**；包含模型语义、各功能字段组合、Summary/排行/Coverage、CSV 与重输、明细开关/无能力/查询失败、已知名称和本人拥有者、未取得清单不假装空集合、取消保存、晚期日志失败回写、文档一致性及实际安装版管道纠错。原有子进程、请求机制与 wheel 验证继续通过。Python 编译、bash 语法、pip check、git diff --check 通过；仓库没有独立 lint/type-check 配置。
+
+已离线构建并重装当前命名 Conda 环境；从 /tmp 核对安装版 steamtool 29 个 Python 文件、schema 5 个 Python 文件与源码相同，现有命令入口可见 --achievements 与 --ranking-limit。本轮没有使用真实账号进行新契约的联网验收，历史联网结果不作为 2.0.0 的真实数据验收证据。

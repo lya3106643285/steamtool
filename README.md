@@ -1,10 +1,12 @@
 # steamtool
 
-一个 Python 3.11+ / WSL 的只读命令行工具包：导出愿望单、本人游戏库与家庭候选，或查询单款游戏。输出业务 JSON 和结构化 JSONL 日志，不启动服务，不需要域名、Docker 或数据库。
+一个 Python 3.11+ / WSL 的只读命令行工具包：导出愿望单、本人游戏库与家庭候选，或按名称批量查询游戏。输出业务 JSON 和结构化 JSONL 日志，不启动服务，不需要域名、Docker 或数据库。
 
 ## 已实现功能与对应命令
 
 当前版本为 **1.1.0**。主命令是 `steamtool`，`teamtool` 和 `Steamtool` 是相同功能的别名；下面的示例都可以替换为这两个名字。
+
+三个核心功能 `games / library / wishlist` 的正式数据契约为 **2.0.0**，与 CLI 软件版本独立。字段和语义以 [docs/data_contract.md](docs/data_contract.md) 为准，模型定义在 `schema/base.py` 和 `schema/feature.py`。`game` 作为旧单游戏兼容入口、`doctor` 作为诊断入口继续使用 1.1.0 格式；历史输出保留。
 
 | 已实现功能 | 对应命令 | 使用条件与结果 |
 | --- | --- | --- |
@@ -12,7 +14,8 @@
 | 愿望单导出 | `steamtool wishlist` | 需要 `STEAM_ID`；读取可访问的愿望单、优先级、添加时间，补充商店详情及可取得的持有关系 |
 | 本人库与游玩记录 | `steamtool library` | 本人库需要 `STEAM_ID` 和 `STEAM_API_KEY`；合并本人库、近期记录和借玩补充，导出时长 |
 | 家庭共享候选与资格 | `steamtool library` | 额外需要 `STEAM_FAMILY_ACCESS_TOKEN`；区分本人持有、家人持有与本人可共享，家庭能力为实验性 |
-| 逐游戏成就和统计 | `steamtool library` | 需要 `STEAM_ID` 和 `STEAM_API_KEY`；读取可取得的成就定义、本人解锁记录和统计，缺失信息保留未知 |
+| 成就汇总与可选明细 | `steamtool library --achievements` | 默认读取成就总数证据；显式参数开启本人完整明细。现有来源无法独立确认默认解锁汇总时保留 null；新契约不含 Stats |
+| 按名称批量查询 | `steamtool games '"Hades","Noita"'` | 保留 ASCII 双引号；无参数时多行收集，空行结束；查询完整 GameRecord，可加 --achievements |
 | 按游戏名称搜索、查询 | `steamtool game "Portal 2"` | 查询公开商店；存在歧义时导出候选，随后指定 AppID |
 | 按 AppID 查询 | `steamtool game --appid 620` | 查询公开详情、价格、平台、发行信息与 DLC ID；配置账号后补充相关持有、时长和愿望单关系 |
 | 按商店链接查询 | `steamtool game "https://store.steampowered.com/app/620/"` | 接受官方 `/app/` 链接；不支持 `/sub/`、`/bundle/` |
@@ -23,7 +26,7 @@
 | 停止运行任务 | `steamtool stop` 或当前终端 `Ctrl+C` | 尽力保存已完成部分；`stop` 针对使用同一配置目录的实例 |
 | 查看帮助和版本 | `steamtool --help` / `steamtool --version` | 无需凭据，也不会发起 Steam 请求 |
 
-每次查询或导出都会生成业务 JSON 和运行日志，支持并发、限速、有限重试、脱敏和取消后的部分结果保存。成就、统计和家庭功能已经实现，但真实账号验收范围仍以[家庭能力与真实验证边界](#家庭能力与真实验证边界)为准。当前没有独立的 `family`、`achievements`、`all` 子命令，也没有自动登录或获取 token 的功能。
+每次查询或导出都会生成业务 JSON 和运行日志，支持并发、限速、有限重试、脱敏和取消后的部分结果保存。家庭能力仍为实验性；下方历史联调记录基于此前输出格式，新的 2.0.0 契约本轮使用离线合成数据验收。当前没有独立的 `family`、`achievements`、`all` 子命令，也没有自动登录或获取 token 的功能。
 
 ## 快速上手
 
@@ -34,7 +37,7 @@ steamtool --version
 steamtool --help
 steamtool config path              # 找到安装版正在使用的配置
 steamtool doctor                   # 先检查配置及接口可用性
-steamtool game --appid 292030      # 查询指定游戏
+steamtool games '"Hades","Noita"' # 按名称批量查询
 steamtool wishlist                # 导出愿望单
 steamtool library                 # 导出游戏库与可取得的补充信息
 ```
@@ -43,7 +46,7 @@ steamtool library                 # 导出游戏库与可取得的补充信息
 
 普通查询命令完成后，终端会打印本次业务 JSON 的完整路径。默认结果在 `~/.steamtool/Outputs`；可以用文件编辑器打开对应 `.json`，并通过同名 `.runtime.jsonl` 查看运行记录。`doctor` 会额外将诊断 JSON 打印到终端。使用自定义 `STEAMTOOL_HOME` 或 `OUTPUT_DIR` 时，以实际打印的路径为准。
 
-输出时间统一为北京时间 UTC+8，与主机时区设置无关。JSON 的运行、采集时间和 JSONL 日志时间使用带 `+08:00` 的 ISO 格式；文件名直接标注“北京时间”，例如 `20261005T000948386572_北京时间_library_efe38f26f590.json`。`meta.output_timezone` 标记为 `北京时间`；Steam 返回的成就解锁、最后游玩等 Unix 时间戳保留原值。
+输出时间统一为北京时间 UTC+8，与主机时区设置无关。JSON 的运行、采集时间和 JSONL 日志时间使用带 `+08:00` 的 ISO 格式；文件名直接标注“北京时间”，例如 `20261005T000948386572_北京时间_library_efe38f26f590.json`。新契约时间位于 `run` 和各块的 `meta.fetched_at`；旧格式保留 `meta.output_timezone=北京时间`。Steam 返回的成就解锁、最后游玩等 Unix 时间戳保留原值。
 
 本机已将安装版和源码版的本地 `.env` 配置为以下绝对输出路径；JSON 和 JSONL 都会写入该目录，调用命令时无需切换工作目录：
 
@@ -119,6 +122,7 @@ steamtool config path
 | `STEAM_FAMILY_ACCESS_TOKEN`                | 本人本地提供的有效会话 access token；仅家庭只读接口使用       |
 | `STEAM_LANGUAGE` / `STEAM_STORE_COUNTRY` | 默认`schinese` / `CN`；查询上下文，不代表识别出的账户地区 |
 | `OUTPUT_DIR`                               | 默认`Outputs`；相对配置目录解析                           |
+| `STEAM_RANKING_LIMIT`                       | Library 排行榜默认 Top-N，默认 10，允许 0                  |
 | `LOG_LEVEL`                                | 默认`INFO`；DEBUG 同样脱敏                                  |
 
 环境变量优先于 `.env`，再使用默认值。`.env` 由 Python 读取，不执行 shell 内容。Key/token 不接受 CLI 参数。无需凭据即可搜索商店和读取单款公开详情；未配置 SteamID 时账号部分为 `not_requested`，拥有关系仍为 `null`。
@@ -141,7 +145,17 @@ steamtool stop
 
 ### 游戏查询
 
-以下四种写法都受支持：
+核心功能支持批量 quoted name：
+
+```bash
+steamtool games '"Hades","Hello, World","Noita"'
+steamtool games --achievements '"Hades"'
+steamtool games
+```
+
+无参数时逐行输入；收集阶段空行结束整批输入。名称内部逗号保留，名称内部双引号使用两个双引号，例如 `"Game ""Special"" Edition"`。错误按项定位并重输；纠错阶段空行只放弃当前错误项，后续项目保留。输入错误只显示在终端，不进入业务 errors。名称必须解析到唯一精确 AppID；没有匹配或存在歧义时记录业务错误，不自动选择第一个候选，不制造占位 AppID。重复明确 AppID 合并为一个记录。
+
+`games` 不接受直接 AppID 或商店 URL。旧 `game` 兼容入口保留以下写法，输出仍为旧格式：
 
 ```bash
 steamtool game "Portal 2"
@@ -157,9 +171,12 @@ steamtool game "https://store.steampowered.com/app/620/"
 ```bash
 steamtool wishlist
 steamtool library
+steamtool library --achievements --ranking-limit 5
 ```
 
-愿望单以 AppID 保留条目，即使详情不可读或游戏下架，也不会静默丢弃。`library` 在相关清单的基础上逐游戏补充商店详情、成就和统计；游戏数量较多时耗时会增加，可在另一个终端执行 `steamtool stop`，或在当前终端按 `Ctrl+C`。
+愿望单以 AppID 保留条目，即使详情不可读或游戏下架，也不会静默丢弃。`library` 只输出 identity、ownership、playtime、achievements，不再请求商店详情或 Stats；默认不请求玩家成就完整明细。`--achievements` 开启明细，`--ranking-limit` 覆盖本次 Top-N。可在另一个终端执行 `steamtool stop`，或在当前终端按 `Ctrl+C`。
+
+当前来源缺口：默认成就总数可来自已有 schema，但没有已验证的独立解锁汇总来源，因此 unlocked/completion_ratio 为 null、Meta 为 partial；开启明细后可从现有玩家成就接口计算汇总。Bundle 来源、地区购买/获取资格和多拥有者昵称映射尚未定义，分别保留 unavailable 或 null，不增加 API 或爬虫。平台记录为零但支持信息未确认时保留 null，只有明确支持时才表达平台零游玩，只有明确不支持时才表达 -1。这些缺口会按必要块规则反映在 Record/Run 状态中。
 
 缺少家庭 token 时仍可读取有权限的本人库，家庭相关字段会标记缺口。账号隐私、权限或接口响应缺失时，以 JSON 中的 `coverage`、各数据块状态和 `errors` 判断可用范围；`partial` 退出码为 `2`，已有结果仍可使用。
 
@@ -195,9 +212,9 @@ python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 
 源码中的 `./start` / `./stop` 仅保留为兼容入口，默认使用项目目录的 `.env` 和输出，选择 Conda 环境的顺序为 `STEAM_CONDA_PREFIX` → 命名环境 `steamtool` → 旧项目 `.conda` → 已激活的 `CONDA_PREFIX`。安装后的 `steamtool` 使用上文用户配置目录。若想直接沿用项目配置而不复制，可设置 `export STEAMTOOL_HOME=/绝对路径/到/steam-tools` 后调用 `steamtool`。
 
-无参数且 stdin 非交互时显示用法并退出。名称仅在返回候选中有唯一精确匹配时自动选择；模糊或同名结果写出 `needs_selection` JSON。使用候选 AppID 再执行即可，非交互命令不会等待输入。`sub` / `bundle` URL 明确不支持。
+主命令无参数且 stdin 非交互时显示用法并退出；显式 `games` 可以从管道或重定向文件收集多行 quoted name。旧 `game` 的模糊或同名结果使用 `needs_selection`；新 `games` 使用根级解析错误。`sub` / `bundle` URL 明确不支持。
 
-单游戏查询只抓目标游戏的详情，为拥有关系读取相关清单，不为全库补详情和成就。个人成就/统计的逐游戏补齐在 `library` 执行。未实现可选 `all`、全应用目录和跨运行缓存。
+Games 只补已解析目标的详情和成就，批内共享本人、家庭和愿望单清单以及现有运行缓存，不为全库补详情。未实现可选 `all`、全应用目录和跨运行缓存。
 
 ## 输出与状态
 
@@ -208,15 +225,15 @@ python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 20261007T102000000000_北京时间_library_012345abcdef.runtime.jsonl
 ```
 
-业务 JSON 使用 `schema_version=1.1.0`，包含 `meta`、`status`、`data.items/resolution/summary`、`id_map`、`name_index`、`coverage` 和最终仍影响结果的 `errors`。日志逐行独立解析，记录阶段、任务、请求、重试、冷却、缓存命中、进度和运行摘要。历史重试失败只留日志；恢复成功不追加到业务错误清单。
+三个核心功能业务 JSON 使用 `schema_version=2.0.0`，字段顺序为 `schema_version / run / summary / coverage（仅 library、wishlist） / errors / items`。各块通过 `meta.state/source/fetched_at/error_id` 表达状态和来源。没有旧顶层 data、meta、status 或名称索引。详细字段、排行榜、三值和 sentinel 规则见 [正式数据契约](docs/data_contract.md)。
 
-V1.1 的完成结果 `outcome` 为 `success / not_applicable / data_unavailable / failed`，用户停止为 `cancelled`。成功块保留 V1.0 的 `state=ok` 并新增 `outcome=success`；未请求块的 outcome 为 null。明确无能力使用 `state=not_applicable`；上游不提供数据或 schema 依赖不可用使用 `state=data_unavailable`；网络重试耗尽、认证失败及损坏响应使用 `state=failed`。ownership 的 `partial` 与时长、清单的三值语义保留；没有时长来源的既有块保留 `state=unavailable`，并明确给出 `outcome=data_unavailable`。
+正式 Meta 状态为 `ok / partial / unavailable / not_applicable / not_requested`，不混用未请求与未取得。Run 状态为 `ok / partial / failed / cancelled`，Record 状态为 `ok / partial / failed`。没有成就系统使用 total=-1、unlocked=-1、items=null；未请求明细只使 items=null，不能因此把记录判为 partial。
 
-Library 的顶层状态由核心本人/家庭清单和 ownership 证据决定。可选补充块缺能力、无数据或请求失败不单独使 library 变成 partial；其失败仍保留在块、coverage、errors 和运行统计中。家庭实验性 `complete=false` 继续导出，单独这项完整性限制不判为 partial；明确截断、本人清单数量不一致、核心来源失败或关键 ownership 未知仍判为 partial。
+Run 根据本次必要数据块、业务错误和集合完整性聚合；核心流程失败为 failed，取消优先为 cancelled。家庭实验性 complete=false 继续如实保留，不宣称集合完整。已形成的记录在补充查询失败或取消时保留。
 
-Enrichment 先合并 AppID；各 App 并发查询 schema 和商店详情。schema 的有效成就/stat 定义分别触发玩家成就和个人统计请求，两者可并行；有效空定义跳过下游并标为 not_applicable。schema 不可用时跳过下游并标为 data_unavailable，记录 DEPENDENCY_FAILED，能力仍为 unknown。不会按名称或未经可靠映射的 app_type 数值跳过。schema 同时提供 stats 与 achievements 定义的用途见 [Valve ISteamUserStats 文档](https://partner.steamgames.com/doc/webapi/ISteamUserStats?l=english)。
+Enrichment 复用已有队列、并发与 schema 驱动的调度。明细关闭时不发送 GetPlayerAchievements；只有明细开启且 schema 有有效定义时才请求完整列表。有效空定义跳过下游并使用无能力语义，schema 不可用时跳过依赖并保留错误，不根据名称或未知数字 app_type 猜能力。运行日志中的 API outcome 与重试决策保留现有语义；日志逐行独立解析，已恢复的重试错误只留日志。
 
-同一运行按 API 和完整查询参数共享 future/result，包括最终失败结果；重试仍由统一执行器处理。无跨运行持久缓存。runtime_summary 的 tasks 固定为一个 App enrichment 一个 task，按 failed、data_unavailable、success、not_applicable 的优先级汇总其四项操作；operations 单独统计 API 逻辑操作（含依赖跳过），http_by_api 统计实际逻辑请求、发送次数和最终结果，enrichment_plan 与 enrichment_decision 日志解释调度和跳过原因。未真正发出的下游请求不会增加 HTTP 数量。
+同一运行按 API 和完整查询参数共享 future/result，包括最终失败结果；重试仍由统一执行器处理。无跨运行持久缓存。运行摘要位于 JSONL 日志，tasks 固定为一个 App enrichment 一个 task；operations、http_by_api、enrichment_plan 分别表达逻辑操作、真实 HTTP 和调度。未真正发出的下游请求不会增加 HTTP 数量。
 
 | 状态                | 退出码 | 含义                                        |
 | ------------------- | -----: | ------------------------------------------- |
@@ -362,7 +379,7 @@ SIGINT/SIGTERM 或 `steamtool stop` 会停止新派发、唤醒限速与重试�
 ```bash
 conda activate steamtool
 python -m pytest -q
-python -m compileall -q main.py steamtool
+python -m compileall -q main.py steamtool schema
 python -m pip check
 bash -n start stop
 ```
@@ -370,5 +387,7 @@ bash -n start stop
 默认测试不联网，不读取真实 `.env`，不需要真实凭据。HTTP 使用 httpx MockTransport；生命周期测试在临时项目启动实际子进程，通过仅测试使用的 sitecustomize 注入模拟 HTTP。测试不会向任意非测试进程发送信号。安装测试在临时环境离线构建并安装 wheel，从源码目录外执行 CLI；不会切换项目的 Conda 管理方式。
 
 `steamtool/Ports/` 每个 API 一个文件，`registry.py` 显式登记，只允许审核过的只读工具。`request_executor.py` 执行请求和恢复决定；`steamtool/error_handler.py` 只分类和决策。`steamtool/scripts/` 仅三个业务模块、持久化和 runtime 五个职责文件。增加 API 时实现适配器、登记工具并补契约测试，不新增另一套 HTTP/重试/日志机制。
+
+`schema/` 定义数据模型与纯派生逻辑，`steamtool/contracts.py` 将当前来源证据适配为正式输出，`steamtool/input_parser.py` 处理 quoted name 与单项纠错。实现依据是 [本轮任务书](task/Steam_Tool_Codex_Task.md) 和 docs 下三份输入文档；两份原始设计资料保留。
 
 详细命令、阶段提交及待联调项见 [实现记录](task/IMPLEMENTATION.md)，逐项测试映射见 [验收矩阵](task/ACCEPTANCE.md)。
