@@ -17,6 +17,8 @@ import uuid
 from steamtool import __version__
 from steamtool.config import config_home, load_config
 from steamtool.error_handler import Failure
+from steamtool.contracts import build_result
+from steamtool.input_parser import GamesInput, InputState, parse_names
 from steamtool.Ports.registry import build_registry
 from steamtool.Ports.request_executor import Executor
 from steamtool.scripts import game, library, wishlist
@@ -172,7 +174,17 @@ def parser():
     target = sub.add_parser('game', help='按名称、AppID 或官方 app URL 查询')
     target.add_argument('query', nargs='?')
     target.add_argument('--appid', type=int)
-    sub.add_parser('library', help='导出本人库及家庭候选')
+    games = sub.add_parser('games', help='按带 ASCII 双引号的名称批量查询；无参数时逐行收集')
+    games.add_argument('query', nargs='?', help='例如：\'"Hades","Noita"\'，保留名称两侧双引号')
+    games.add_argument('--achievements', action='store_true', help='查询逐项成就明细')
+    library_cli = sub.add_parser('library', help='导出本人库及家庭候选')
+    library_cli.add_argument('--achievements', action='store_true', help='查询逐项成就明细')
+    def ranking_limit(value):
+        number = int(value)
+        if number < 0:
+            raise argparse.ArgumentTypeError('排行榜数量必须为非负整数')
+        return number
+    library_cli.add_argument('--ranking-limit', type=ranking_limit, help='本次排行榜 Top-N（默认读取 STEAM_RANKING_LIMIT）')
     sub.add_parser('wishlist', help='导出愿望单')
     sub.add_parser('doctor', help='配置、注册、输出及少量只读网络诊断，输出 JSON')
     sub.add_parser('stop', help='安全停止使用同一配置目录的运行实例')
@@ -247,6 +259,14 @@ def unwrap_failure(exc):
 
 async def execute(args, config, stop_event=None, *, transport=None):
     stop_event = stop_event or asyncio.Event()
+    if args.feature == 'games' and not hasattr(args, 'names'):
+        parsed = parse_names(getattr(args, 'query', None) or '')
+        for item in parsed:
+            if item.error:
+                print(str(item.error), file=sys.stderr)
+        if not parsed or any(item.error for item in parsed):
+            return 2
+        args.names = [item.name for item in parsed]
     stem, document = new_run(args.feature, config)
     output = config.output_dir / (stem + '.json')
     redact = Redactor(config.secrets)
@@ -262,10 +282,16 @@ async def execute(args, config, stop_event=None, *, transport=None):
             runtime.event("phase_started", phase=args.feature)
             if args.feature == 'game':
                 await game.run(registry, config, document, runtime, query=args.query, appid=args.appid)
+            elif args.feature == 'games':
+                await game.run_games(registry, config, document, runtime, names=args.names,
+                                     achievements_detail=getattr(args, 'achievements', False))
             elif args.feature == 'doctor':
                 await doctor(registry, config, document)
+            elif args.feature == 'library':
+                await library.run(registry, config, document, runtime,
+                                  achievements_detail=getattr(args, 'achievements', False))
             else:
-                await {'library': library.run, 'wishlist': wishlist.run}[args.feature](registry, config, document, runtime)
+                await wishlist.run(registry, config, document, runtime)
             elapsed = (time.monotonic() - phase_start) * 1000
             runtime.phases[args.feature] = elapsed
             runtime.event("phase_finished", phase=args.feature, duration_ms=elapsed)
@@ -317,10 +343,16 @@ async def execute(args, config, stop_event=None, *, transport=None):
     document['data']['items'].sort(key=lambda item: item['appid'])
     if runtime:
         document['meta']['runtime_summary'] = runtime.summary()
+    def export_document():
+        if args.feature in {'games', 'library', 'wishlist'}:
+            result = build_result(document, config, ranking_limit=getattr(args, 'ranking_limit', None)).to_dict()
+            document['status'] = result['run']['status']
+            return result
+        return document
     try:
         if runtime and not runtime.failed:
             runtime.event('export_started')
-        path = save(document, output, redact)
+        path = save(export_document(), output, redact)
         published = True
         if runtime and not runtime.failed:
             runtime.event('export_saved', message=str(path))
@@ -333,7 +365,7 @@ async def execute(args, config, stop_event=None, *, transport=None):
         if exc.code == 'LOG_WRITE_FAILED':
             # Only amend the file just published by this run; never overwrite another run.
             try:
-                save(document, output, redact, amend_current=published)
+                save(export_document(), output, redact, amend_current=published)
                 published = True
             except Failure:
                 print('OUTPUT_WRITE_FAILED: failed to save after log failure', file=sys.stderr)
@@ -353,13 +385,17 @@ async def execute(args, config, stop_event=None, *, transport=None):
 
 
 async def read_line(prompt, stop_event):
-    print(prompt, end='', flush=True)
+    print(prompt, end='', flush=True, file=sys.stderr)
     loop = asyncio.get_running_loop()
     ready = loop.create_future()
     def readable():
         if not ready.done():
             ready.set_result(sys.stdin.readline())
-    loop.add_reader(sys.stdin.fileno(), readable)
+    try:
+        loop.add_reader(sys.stdin.fileno(), readable)
+    except PermissionError:
+        # Regular redirected files and /dev/null cannot be registered with epoll.
+        return sys.stdin.readline().strip()
     stopper = asyncio.create_task(stop_event.wait())
     try:
         done, _ = await asyncio.wait({ready, stopper}, return_when=asyncio.FIRST_COMPLETED)
@@ -370,6 +406,26 @@ async def read_line(prompt, stop_event):
         await asyncio.gather(stopper, return_exceptions=True)
 
 
+async def collect_game_names(stop_event, initial=None):
+    collected = GamesInput()
+    if initial is not None:
+        collected.feed(initial)
+    while not collected.done and not stop_event.is_set():
+        if initial is not None and collected.state == InputState.COLLECTING_INPUT:
+            collected.feed('')
+            break
+        if collected.state == InputState.CORRECTING_ITEM:
+            print(str(collected.error), file=sys.stderr)
+            prompt = f'请重新输入第 {collected.error.item_index} 项（直接回车表示放弃该项） > '
+        else:
+            prompt = '游戏名称（ASCII 双引号；空行结束输入） > '
+        line = await read_line(prompt, stop_event)
+        if line is None:
+            return None
+        collected.feed(line)
+    return None if stop_event.is_set() else collected.names
+
+
 async def session(args, config):
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -377,19 +433,28 @@ async def session(args, config):
         loop.add_signal_handler(sig, stop_event.set)
     try:
         if args.feature:
+            if args.feature == 'games':
+                names = await collect_game_names(stop_event, args.query)
+                if names is None:
+                    return 130
+                if not names:
+                    return 0
+                args.names = names
             return await execute(args, config, stop_event)
         while not stop_event.is_set():
             choice = await read_line('\n1 愿望单 / 2 游戏库 / 3 游戏查询 / 4 诊断 / 0 退出 > ', stop_event)
             if choice in {None, '', '0'}:
                 break
-            feature = {'1': 'wishlist', '2': 'library', '3': 'game', '4': 'doctor'}.get(choice)
+            feature = {'1': 'wishlist', '2': 'library', '3': 'games', '4': 'doctor'}.get(choice)
             if not feature:
                 print('请输入 0–4。')
                 continue
-            query = await read_line('游戏名、AppID 或商店 app URL > ', stop_event) if feature == 'game' else None
+            names = await collect_game_names(stop_event) if feature == 'games' else None
             if stop_event.is_set():
                 break
-            await execute(argparse.Namespace(feature=feature, query=query, appid=None), config, stop_event)
+            if feature == 'games' and not names:
+                continue
+            await execute(argparse.Namespace(feature=feature, query=None, appid=None, names=names), config, stop_event)
         return 130 if stop_event.is_set() else 0
     finally:
         for sig in (signal.SIGINT, signal.SIGTERM):

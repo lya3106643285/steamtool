@@ -302,16 +302,17 @@ def test_duplicate_collection_apps_and_known_game_fields(tmp_path):
         ex = Executor(cfg, runtime.event, transport=httpx.MockTransport(transport))
         registry = build_registry(ex)
         try:
-            await library.run(registry, cfg, doc, runtime)
+            await library.run(registry, cfg, doc, runtime, achievements_detail=True)
             # App 2 is present in owned, Family, recent and played-family sources.
             items = {i["appid"]: i for i in doc["data"]["items"]}
             assert len(items) == runtime.total == 5
-            for route in ("GetSchemaForGame", "GetPlayerAchievements", "GetUserStatsForGame", "appdetails"):
+            for route in ("GetSchemaForGame", "GetPlayerAchievements"):
                 assert sum(n for p, n in calls.items() if route in p) == 5
+            for route in ("GetUserStatsForGame", "appdetails"):
+                assert not any(route in path for path in calls)
             item = items[2]
             assert item["achievements"]["items"][0]["unlock_time"] == 123
-            assert item["stats"]["items"] == [dict(name="score", value=7)]
-            assert item["store"]["data"]["type"] == "game"
+            assert item["stats"]["state"] == item["store"]["state"] == "not_requested"
             assert item["playtime"]["last_2weeks_minutes"] == 4
             assert item["playtime"]["last_played_at"] == 123
             assert item["playtime"]["platform_minutes"] == dict(windows=40, linux=30)

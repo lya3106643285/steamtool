@@ -21,6 +21,7 @@ async def collect_accounts(registry, config, document, runtime, *, player_data=T
         result = await registry.call(name, params)
         collections[key] = result
         add_result(document, key, result, request_scope=result.data.get("request_scope"),
+                   distinct_count=len({row["appid"] for row in result.data["items"]}) if "items" in result.data else None,
                    potentially_truncated=result.data.get("potentially_truncated"))
         # Publish each completed collection immediately so cancellation preserves its IDs.
         if document["meta"]["feature"] == "library":
@@ -28,9 +29,14 @@ async def collect_accounts(registry, config, document, runtime, *, player_data=T
             for row in result.data.get("items", []):
                 if row["appid"] not in existing:
                     item = record(row["appid"], config.steamid, row.get("name"))
+                    item["_identity_meta"] = block("ok" if row.get("name") else "partial", result.source, result.fetched_at)
                     document["data"]["items"].append(item)
                     existing[row["appid"]] = item
                     index_app(document, row["appid"], row.get("name"), result.source)
+                elif row.get("name") and not existing[row["appid"]]["name"]:
+                    existing[row["appid"]]["name"] = row["name"]
+                    existing[row["appid"]]["_identity_meta"] = block("ok", result.source, result.fetched_at)
+                    index_app(document, row["appid"], row["name"], result.source)
             for item in existing.values():
                 merge_ownership(item, collections, config.steamid)
                 merge_playtime(item, collections, config.steamid)
@@ -90,7 +96,8 @@ def merge_ownership(item, collections, subject):
     item["ownership"] = block("ok" if all(v is not None for v in (owned_by_self, other, available)) else "partial",
         source=[own.source, family.source], fetched_at={"owned": own.fetched_at, "family": family.fetched_at},
         owned_by_self=owned_by_self, owned_by_other_family_members=other, available_via_family=available,
-        owner_steamids=owners, shared_exclusion_reason=reason)
+        owner_steamids=owners, shared_exclusion_reason=reason,
+        error_id=next((result.error["error_id"] for result in (own, family) if result.error), None))
 
 
 def merge_playtime(item, collections, subject):
@@ -143,7 +150,7 @@ def merge_achievements(schema, player, subject):
         error_id=(player.error or schema.error or {}).get("error_id"))
 
 
-async def enrich_player(registry, config, document, item):
+async def enrich_player(registry, config, document, item, *, details=True, include_stats=True):
     context = {"task_id": f"app-{item['appid']}"}
     registry.executor.event("enrichment_decision", appid=item["appid"], operation="schema", decision="scheduled", reason="capability discovery", **context)
     schema = await registry.call("get_schema_for_game", {"appid": item["appid"], "language": config.language}, context)
@@ -155,6 +162,18 @@ async def enrich_player(registry, config, document, item):
         # Only a validated complete schema is negative capability evidence.
         definitions = schema.data.get(operation)
         verified = schema.state == "ok" and schema.data.get("complete") is True and isinstance(definitions, list)
+        if operation == "achievements" and not details and verified and definitions:
+            # TODO: current ports have no verified summary-only unlocked-count source.
+            # Do not silently fetch a complete player achievement list in default mode.
+            result = Result("partial", {"complete": False}, source=schema.source, fetched_at=schema.fetched_at)
+            item[operation] = block("partial", schema.source, schema.fetched_at,
+                                    total=len(definitions), unlocked=None, completion_ratio=None, items=None)
+            registry.executor.event("enrichment_decision", appid=item["appid"], operation=operation,
+                                    decision="skipped_not_requested", reason="detail disabled; unlocked summary source unconfirmed", **context)
+            add_result(document, f"{operation}:{item['appid']}", result)
+            registry.executor.event("operation_finished", api=api, appid=item["appid"],
+                                    operation_id=f"{operation}:{item['appid']}", outcome=result.outcome, **context)
+            return
         if verified and definitions:
             decision, reason = "scheduled", "schema contains definitions"
             params = dict(appid=item["appid"], steamid=config.steamid)
@@ -163,6 +182,10 @@ async def enrich_player(registry, config, document, item):
             registry.executor.event("enrichment_decision", appid=item["appid"], operation=operation,
                                     decision=decision, reason=reason, **context)
             result = await registry.call(api, params, context)
+            if operation == "achievements" and result.state == "not_applicable":
+                # A missing player record cannot negate an explicitly positive app schema.
+                result = Result("data_unavailable", error=result.error, source=result.source,
+                                fetched_at=result.fetched_at, attempts=result.attempts)
         else:
             state = "not_applicable" if verified or schema.state == "not_applicable" else "data_unavailable"
             decision = "skipped_not_applicable" if state == "not_applicable" else "skipped_dependency"
@@ -180,15 +203,19 @@ async def enrich_player(registry, config, document, item):
                                 operation_id=f"{operation}:{item['appid']}", outcome=result.outcome, **context)
         if operation == "achievements":
             item[operation] = merge_achievements(schema, result, config.steamid)
+            if not details or result.state not in {"ok", "not_applicable"}:
+                item[operation]["items"] = None
         else:
             item[operation] = block(result.state, result.source, result.fetched_at, subject_steamid=config.steamid,
                                     items=result.data.get("items", []), error_id=result.error["error_id"] if result.error else None)
     async with asyncio.TaskGroup() as tasks:
         tasks.create_task(downstream("achievements", "get_player_achievements"))
-        tasks.create_task(downstream("stats", "get_user_stats_for_game"))
+        if include_stats:
+            tasks.create_task(downstream("stats", "get_user_stats_for_game"))
 
 
-async def enrich_items(registry, config, document, runtime, *, player_data):
+async def enrich_items(registry, config, document, runtime, *, player_data, details=True,
+                       include_stats=True, include_store=True):
     items = document["data"]["items"]
     if runtime:
         runtime.total = len(items)
@@ -206,9 +233,10 @@ async def enrich_items(registry, config, document, runtime, *, player_data):
                 runtime.task(task_id, "running", appid=item["appid"])
             try:
                 async with asyncio.TaskGroup() as tasks:
-                    tasks.create_task(enrich_store(registry, config, document, item))
+                    if include_store:
+                        tasks.create_task(enrich_store(registry, config, document, item))
                     if player_data:
-                        tasks.create_task(enrich_player(registry, config, document, item))
+                        tasks.create_task(enrich_player(registry, config, document, item, details=details, include_stats=include_stats))
                 if runtime:
                     outcomes = {c["outcome"] for source in ("store", "schema", "achievements", "stats")
                                 if (c := document["coverage"].get(f"{source}:{item['appid']}"))}
@@ -256,20 +284,30 @@ def finish_status(document, primary_ok):
     items.sort(key=lambda item: item["appid"])
 
 
-async def run(registry, config, document, runtime):
+async def run(registry, config, document, runtime, *, achievements_detail=False):
     if not config.steamid:
         raise Failure("CONFIG_INVALID", "STEAM_ID is required for library export", source="config", scope="feature")
     collections = await collect_accounts(registry, config, document, runtime)
-    candidates = {}
+    candidates, origins = {}, {}
     for key in ("family", "played_family", "recent", "owned"):
-        candidates.update(rows_by_id(collections.get(key)))
+        rows = rows_by_id(collections.get(key))
+        for appid, row in rows.items():
+            prior = candidates.get(appid, {})
+            candidates[appid] = {**prior, **row}
+            if row.get("name") or appid not in origins:
+                origins[appid] = collections[key]
+            elif prior.get("name"):
+                candidates[appid]["name"] = prior["name"]
     document["data"]["items"].clear()
     for appid in sorted(candidates):
         row = candidates[appid]
         item = record(appid, config.steamid, row.get("name"))
+        item["app_type"] = row.get("app_type") if isinstance(row.get("app_type"), str) else None
+        item["_identity_meta"] = block("ok" if row.get("name") else "partial", origins[appid].source, origins[appid].fetched_at)
         merge_ownership(item, collections, config.steamid)
         merge_playtime(item, collections, config.steamid)
         document["data"]["items"].append(item)
         index_app(document, appid, item["name"], "library collections")
-    await enrich_items(registry, config, document, runtime, player_data=True)
+    await enrich_items(registry, config, document, runtime, player_data=True,
+                       details=achievements_detail, include_stats=False, include_store=False)
     finish_status(document, collections["owned"].state == "ok" or collections["family"].state == "ok")

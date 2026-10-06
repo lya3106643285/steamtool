@@ -124,11 +124,28 @@ def test_installed_console_stop_saves_partial_result(installed, project):
         stdout, stderr = child.communicate(timeout=5)
         assert child.returncode == 130, stderr
         result = json.loads(Path(stdout.strip()).read_text())
-        assert result['status'] == 'cancelled'
-        assert result['data']['items'][0]['store']['state'] == 'ok'
+        assert result['run']['status'] == 'cancelled'
+        assert result['items'][0]['identity']['meta']['state'] == 'ok'
         assert not (home / '.runtime/instance.json').exists()
         assert not (root / 'Outputs').exists()
     finally:
         if child.poll() is None:
             child.kill()
         child.communicate(timeout=5)
+
+
+def test_installed_games_piped_correction_and_formal_contract(installed, project):
+    command, _ = installed
+    root, env = project
+    home = root.parent / 'games-home'
+    env['STEAMTOOL_HOME'] = str(home)
+    result = subprocess.run([str(command), 'games'], input='"Synthetic",Bad,"Synthetic"\nBad again\n\n"Synthetic"\n\n',
+                            env=env, cwd='/tmp', capture_output=True, text=True, timeout=5)
+    assert result.returncode == 2, result.stderr
+    path = Path(result.stdout.strip())
+    doc = json.loads(path.read_text())
+    assert doc['schema_version'] == '2.0.0' and doc['run']['feature'] == 'games'
+    assert len(doc['items']) == 1  # All valid duplicate targets resolve to the same AppID.
+    assert result.stderr.count('QUERY_NAME_NOT_QUOTED') == 2
+    assert not any(error['code'].startswith('QUERY_') for error in doc['errors'])
+    assert doc['items'][0]['achievements']['items'] is None

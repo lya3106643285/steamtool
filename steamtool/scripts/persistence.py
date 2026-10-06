@@ -53,7 +53,9 @@ def save(result, path, redact=lambda x: x, *, amend_current=False):
         # link is atomic and refuses to clobber an existing run, unlike replace.
         if amend_current:
             existing = json.loads(path.read_text(encoding="utf-8"))
-            if existing.get("meta", {}).get("run_id") != result.get("meta", {}).get("run_id"):
+            existing_id = existing.get("run", existing.get("meta", {})).get("run_id")
+            result_id = result.get("run", result.get("meta", {})).get("run_id")
+            if not result_id or existing_id != result_id:
                 raise ValueError("Refusing to amend a different run")
             os.replace(temporary, path)
             temporary = None

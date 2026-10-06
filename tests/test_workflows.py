@@ -87,7 +87,9 @@ def test_library_semantics():
     assert items[4]["playtime"]["total_minutes"] is None
     assert items[4]["ownership"]["available_via_family"] is True
     assert items[5]["ownership"]["available_via_family"] is None
-    assert items[1]["achievements"]["completion_ratio"] == 1
+    assert items[1]["achievements"]["total"] == 1
+    assert items[1]["achievements"]["unlocked"] is None
+    assert items[1]["achievements"]["items"] is None
     assert document["status"] == "partial"  # Ownership of some candidates remains unknown.
     assert set(document["id_map"]) == {str(i) for i in items}
     assert all(isinstance(v, list) for v in document["name_index"].values())

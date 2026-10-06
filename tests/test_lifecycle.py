@@ -43,6 +43,8 @@ import asyncio, os
 import httpx
 original = httpx.AsyncClient
 async def respond(request):
+    if "storesearch" in request.url.path:
+        return httpx.Response(200, json={"items": [{"id": 1, "name": "Synthetic"}]})
     if "GetWishlistItemCount" in request.url.path:
         return httpx.Response(200, json={"response": {"count": 2}})
     if "GetWishlist" in request.url.path:
@@ -112,9 +114,9 @@ def test_stop_preserves_completed_items_and_single_instance(project):
         stdout, stderr = child.communicate(timeout=5)
         assert child.returncode == 130, stderr
         document = json.loads(Path(stdout.strip()).read_text())
-        assert document['status'] == 'cancelled'
-        assert [i['appid'] for i in document['data']['items']] == [1, 2]
-        assert document['data']['items'][0]['store']['state'] == 'ok'
+        assert document['run']['status'] == 'cancelled'
+        assert [i['identity']['appid'] for i in document['items']] == [1, 2]
+        assert document['items'][0]['identity']['meta']['state'] == 'ok'
         assert has_event(root, 'stop_requested') and has_event(root, 'run_cancelled')
         repeated = subprocess.run([str(root / 'stop')], env=env, capture_output=True, text=True, timeout=5)
         assert repeated.returncode == 0
@@ -180,12 +182,12 @@ def test_menu_multiple_runs_and_exit(project):
     os.close(slave)
     try:
         wait_for(lambda: (root / '.runtime/instance.json').exists())
-        os.write(master, b'3\n1\n3\n1\n0\n')
+        os.write(master, b'3\n"Synthetic"\n\n3\n"Synthetic"\n\n0\n')
         child.communicate(timeout=5)
         assert child.returncode == 0
         results = list((root / 'Outputs').glob('*.json'))
         assert len(results) == 2
-        assert len({json.loads(p.read_text())['meta']['run_id'] for p in results}) == 2
+        assert len({json.loads(p.read_text())['run']['run_id'] for p in results}) == 2
     finally:
         os.close(master)
         if child.poll() is None:
