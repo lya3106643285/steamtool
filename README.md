@@ -43,6 +43,16 @@ steamtool library                 # 导出游戏库与可取得的补充信息
 
 普通查询命令完成后，终端会打印本次业务 JSON 的完整路径。默认结果在 `~/.steamtool/Outputs`；可以用文件编辑器打开对应 `.json`，并通过同名 `.runtime.jsonl` 查看运行记录。`doctor` 会额外将诊断 JSON 打印到终端。使用自定义 `STEAMTOOL_HOME` 或 `OUTPUT_DIR` 时，以实际打印的路径为准。
 
+输出时间统一为北京时间 UTC+8，与主机时区设置无关。JSON 的运行、采集时间和 JSONL 日志时间使用带 `+08:00` 的 ISO 格式；文件名直接标注“北京时间”，例如 `20261005T000948386572_北京时间_library_efe38f26f590.json`。`meta.output_timezone` 标记为 `北京时间`；Steam 返回的成就解锁、最后游玩等 Unix 时间戳保留原值。
+
+本机已将安装版和源码版的本地 `.env` 配置为以下绝对输出路径；JSON 和 JSONL 都会写入该目录，调用命令时无需切换工作目录：
+
+```dotenv
+OUTPUT_DIR=/home/lya3106643285/projects/steam-tools/Outputs
+```
+
+这是本地配置覆盖，程序通用默认值不变；安装版的凭据与实例状态仍在 `~/.steamtool`。旧输出保留原位置，修改路径不搬动或覆盖历史结果。
+
 ## 安装与配置
 
 steamtool 是可安装的 Python CLI 包，发行包名称为 `steamtool-cli`，命令名称为 `steamtool`。使用 Conda 管理 Python 和依赖，在本项目目录首次安装：
@@ -194,8 +204,8 @@ python -m pip install dist/steamtool_cli-1.1.0-py3-none-any.whl
 每次实际任务分配独立 `run_id`，在输出目录产生：
 
 ```text
-20261002T160000000000Z_library_012345abcdef.json
-20261002T160000000000Z_library_012345abcdef.runtime.jsonl
+20261007T102000000000_北京时间_library_012345abcdef.json
+20261007T102000000000_北京时间_library_012345abcdef.runtime.jsonl
 ```
 
 业务 JSON 使用 `schema_version=1.1.0`，包含 `meta`、`status`、`data.items/resolution/summary`、`id_map`、`name_index`、`coverage` 和最终仍影响结果的 `errors`。日志逐行独立解析，记录阶段、任务、请求、重试、冷却、缓存命中、进度和运行摘要。历史重试失败只留日志；恢复成功不追加到业务错误清单。
@@ -287,6 +297,26 @@ Enrichment 先合并 AppID；各 App 并发查询 schema 和商店详情。schem
 Portal 2、Left 4 Dead 的成就/stats/Store 均实际成功；Cities: Skylines 继续为本人不持有、家人持有且可共享；Source SDK Base 2006 的补充为 data_unavailable，不再产生 failed 风暴；原 13 个明确无成就的 App 全部保留该语义且没有成就请求。客户端全量对照、其他账号/地区/权限、实时网络重试仍未实测；长期缓存和复杂类型映射留待后续版本。
 
 本轮 111 项离线测试通过，包含单元、MockTransport、子进程及 wheel 测试。真实 JSON、日志和审计汇总在项目 Outputs；本轮仅更新源码与文档，没有重装命名环境中已安装的 CLI。要让安装版 `steamtool` 使用补丁，需按上文从当前源码重新构建并安装 wheel。
+
+## 2026-10-05 安装版重装与输出路径验证
+
+从当前源码构建 1.1.0 wheel，以 `--force-reinstall --no-deps --no-index` 重装到 Conda 命名环境 `steamtool`，保留现有依赖、凭据与历史结果。三个命令入口可用；安装版 27 个 Python 文件与源码一致。测试进程实际导入重装后的包，完整离线测试 **111 passed in 25.16s**，pip check 无依赖冲突。
+
+仅将安装版 `~/.steamtool/.env` 和源码版项目 `.env` 的 OUTPUT_DIR 改为 `/home/lya3106643285/projects/steam-tools/Outputs`，其他配置和 0600 权限保留；业务代码及通用路径默认值未修改。
+
+从 `/tmp` 调用安装版命令进行真实联网验证。doctor run `fc9e12d6c37e` 为 ok、退出 0，public/profile/family 三项探测均成功且输出目录可写。完整 library run `efe38f26f590` 为 schema_version=1.1.0，420 App、1160 logical/HTTP attempts、零重试/429；App success 149、data_unavailable 270、failed 1，wall 842.57 s、enrichment 839.07 s。
+
+与上一轮相比，真实来源新增 1 个 App；原 419 个 App 无遗漏，原 ownership 字段无变化，原成功的时长 137、成就 213、stats 25、Store 277 个块全部保留。Family group/shared library 均成功；唯一玩家成就 ACCESS_DENIED 与上一轮同一请求。顶层仍为 partial、退出 2，保留 280 条 ownership 不确定性，并在可选块中保留实际权限拒绝。输出没有重复 enrichment 请求、没有跳过后仍发送的请求，也未发现 Key/token 泄漏。
+
+业务 JSON、同名 runtime JSONL 及 reinstall-audit.json 均保存至指定项目 Outputs；文件名时间仍为 UTC。本轮仅修改本地输出配置并重装，没有搬动旧结果，也没有新增业务逻辑。
+
+## 2026-10-05 输出时区调整
+
+后续输出改为上述 UTC+8 格式，并更新命名环境中的安装版。项目 Outputs 与旧 `~/.steamtool/Outputs` 的 29 个历史结果文件已转换：43,817 个时间字段、28 个文件名及 16 处文件名引用同步更新。转换前完整备份至项目 Outputs 的 `.timezone-backups`；`timezone_migration_20261005T004517510410_北京时间.json` 记录当次转换的原名、新名及文件校验值。随后将现有文件名和输出时区名称直接改为“北京时间”，时间值不变；后续重命名记录见 `beijing_rename_*.json`。
+
+转换逐项核对了时间点和业务数据：只改变时间的显示时区，原始 Unix 时间戳、耗时、游戏数据和查询结果均保留。UTC+8 跨日文件名、日志和采集时间测试通过，完整离线测试 **114 passed in 20.92s**。
+
+重装后从 `/tmp` 联网运行 doctor，run `cc633defa7a4` 的文件名、JSON 和运行日志均为 UTC+8。public/profile 探测成功；family 返回 `AUTH_EXPIRED`，本次状态为 partial、退出 2，需要更新家庭令牌后再验证家庭接口。输出目录保持指定绝对路径。
 
 ## 请求控制与停止
 

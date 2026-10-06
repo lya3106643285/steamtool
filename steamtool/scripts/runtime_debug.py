@@ -1,7 +1,7 @@
 """Single structured, redacted logging outlet and run-level supervision."""
 import asyncio
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import re
@@ -13,8 +13,15 @@ from urllib.parse import quote
 from steamtool.error_handler import Failure
 
 
-def utcnow():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+OUTPUT_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def output_now():
+    return datetime.now(OUTPUT_TIMEZONE)
+
+
+def timestamp_now():
+    return output_now().isoformat()
 
 
 class Redactor:
@@ -65,7 +72,7 @@ class Runtime:
     def event(self, event, *, level="INFO", module="runtime", **fields):
         if self.failed:
             raise Failure("LOG_WRITE_FAILED", "Runtime log unavailable", source="runtime")
-        row = dict(timestamp=utcnow(), level=level, event=event, module=module,
+        row = dict(timestamp=timestamp_now(), level=level, event=event, module=module,
                    run_id=self.run_id, feature=self.feature, task_id=None, request_id=None,
                    attempt=None, api=None, appid=None, duration_ms=None, queue_wait_ms=None,
                    throttle_wait_ms=None, retry_wait_ms=None, http_status=None, error_code=None,

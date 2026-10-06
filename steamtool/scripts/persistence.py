@@ -1,5 +1,4 @@
 """Result envelopes and exclusive, atomic local JSON publication."""
-from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -8,7 +7,7 @@ import unicodedata
 import uuid
 
 from steamtool.error_handler import Failure
-from steamtool.scripts.runtime_debug import utcnow
+from steamtool.scripts.runtime_debug import output_now
 
 
 def normalize(name):
@@ -17,9 +16,11 @@ def normalize(name):
 
 def new_run(feature, config):
     run_id = uuid.uuid4().hex[:12]
-    stem = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + f"_{feature}_{run_id}"
+    started = output_now()
+    stem = started.strftime("%Y%m%dT%H%M%S%f") + f"_北京时间_{feature}_{run_id}"
     result = dict(schema_version="1.1.0", meta=dict(run_id=run_id, feature=feature,
-                  started_at=utcnow(), finished_at=None, subject_steamid=config.steamid or None,
+                  started_at=started.isoformat(), finished_at=None, subject_steamid=config.steamid or None,
+                  output_timezone="北京时间",
                   language=config.language, store_country=config.country), status="ok",
                   data=dict(items=[], resolution=None, summary={}), id_map={}, name_index={}, coverage={}, errors=[])
     return stem, result

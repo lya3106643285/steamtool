@@ -1,7 +1,6 @@
 """Reusable HTTP transport; sole retry loop and actual-send admission control."""
 import asyncio
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import random
 import time
 from urllib.parse import urlsplit
@@ -9,6 +8,7 @@ import uuid
 
 import httpx
 from steamtool.error_handler import Failure, decide, classify_http, classify_transport, error_outcome, result_outcome
+from steamtool.scripts.runtime_debug import timestamp_now
 
 
 @dataclass
@@ -198,7 +198,7 @@ class Executor:
                                outcome=result_outcome(state), duration_ms=(self.clock() - start) * 1000, **context)
                     self.event("request_finished", module=__name__, outcome=result_outcome(state), **context)
                     return Result(state, data, source=spec.api,
-                                  fetched_at=datetime.now(timezone.utc).isoformat(), attempts=attempts)
+                                  fetched_at=timestamp_now(), attempts=attempts)
             except asyncio.CancelledError:
                 raise
             except Failure as exc:

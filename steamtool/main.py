@@ -21,7 +21,7 @@ from steamtool.Ports.registry import build_registry
 from steamtool.Ports.request_executor import Executor
 from steamtool.scripts import game, library, wishlist
 from steamtool.scripts.persistence import new_run, save
-from steamtool.scripts.runtime_debug import Redactor, Runtime, utcnow
+from steamtool.scripts.runtime_debug import Redactor, Runtime, timestamp_now
 
 
 def process_identity(pid):
@@ -52,7 +52,7 @@ class InstanceLock:
             raise Failure('CONFIG_INVALID', 'This project already has a running instance', source='lifecycle') from None
         try:
             info = dict(application='steamtool', pid=os.getpid(), project=str(self.root), instance_id=self.identity,
-                        started_at=utcnow(), **process_identity(os.getpid()))
+                        started_at=timestamp_now(), **process_identity(os.getpid()))
             self.file.seek(0)
             self.file.truncate()
             self.file.write(self.identity)
@@ -313,7 +313,7 @@ async def execute(args, config, stop_event=None, *, transport=None):
     if document['status'] == 'cancelled' and runtime and not runtime.failed:
         for item in document['data']['items']:
             runtime.task(f"app-{item['appid']}", 'cancelled', appid=item['appid'])
-    document['meta']['finished_at'] = utcnow()
+    document['meta']['finished_at'] = timestamp_now()
     document['data']['items'].sort(key=lambda item: item['appid'])
     if runtime:
         document['meta']['runtime_summary'] = runtime.summary()
