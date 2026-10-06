@@ -50,6 +50,7 @@ class Config:
     stop_grace: float = 5
     progress_interval: float = 5
     log_level: str = "INFO"
+    ranking_limit: int = 10
 
     @property
     def secrets(self):
@@ -98,4 +99,10 @@ def load_config(root=None, environ=None):
         except (ValueError, OverflowError):
             invalid(name)
     kwargs["output_dir"] = (root / get("OUTPUT_DIR", "Outputs")).resolve()
+    try:
+        kwargs["ranking_limit"] = int(get("STEAM_RANKING_LIMIT", 10))
+        if kwargs["ranking_limit"] < 0:
+            invalid("STEAM_RANKING_LIMIT")
+    except (ValueError, OverflowError):
+        invalid("STEAM_RANKING_LIMIT")
     return Config(**kwargs)

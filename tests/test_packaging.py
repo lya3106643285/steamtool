@@ -23,7 +23,8 @@ def installed(tmp_path_factory):
     source.mkdir()
     for name in ('pyproject.toml', 'MANIFEST.in', 'README.md', 'requirements.txt', '.env.example'):
         shutil.copy2(ROOT / name, source / name)
-    shutil.copytree(ROOT / 'steamtool', source / 'steamtool', ignore=shutil.ignore_patterns('__pycache__'))
+    for package in ('steamtool', 'schema'):
+        shutil.copytree(ROOT / package, source / package, ignore=shutil.ignore_patterns('__pycache__'))
     wheels = directory / 'wheels'
     built = subprocess.run([sys.executable, '-m', 'pip', 'wheel', str(source), '--no-deps', '--no-build-isolation', '--no-index', '-w', str(wheels)], capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stderr
@@ -53,7 +54,8 @@ def test_wheel_is_namespaced_and_has_no_local_data(installed):
         names = archive.namelist()
         assert 'steamtool/resources/env.example' in names
         assert 'steamtool/main.py' in names
-        assert all(n.startswith(('steamtool/', 'steamtool_cli-1.1.0.dist-info/')) for n in names)
+        assert 'schema/base.py' in names and 'schema/feature.py' in names
+        assert all(n.startswith(('steamtool/', 'schema/', 'steamtool_cli-1.1.0.dist-info/')) for n in names)
         assert not any(n.endswith('/.env') or 'Outputs/' in n or '.runtime/' in n for n in names)
         template = archive.read('steamtool/resources/env.example').decode()
         assert 'STEAM_API_KEY=\n' in template and 'STEAM_FAMILY_ACCESS_TOKEN=\n' in template

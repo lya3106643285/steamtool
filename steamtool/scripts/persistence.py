@@ -8,6 +8,7 @@ import uuid
 
 from steamtool.error_handler import Failure
 from steamtool.scripts.runtime_debug import output_now
+from schema.version import LEGACY_SCHEMA_VERSION
 
 
 def normalize(name):
@@ -18,7 +19,7 @@ def new_run(feature, config):
     run_id = uuid.uuid4().hex[:12]
     started = output_now()
     stem = started.strftime("%Y%m%dT%H%M%S%f") + f"_北京时间_{feature}_{run_id}"
-    result = dict(schema_version="1.1.0", meta=dict(run_id=run_id, feature=feature,
+    result = dict(schema_version=LEGACY_SCHEMA_VERSION, meta=dict(run_id=run_id, feature=feature,
                   started_at=started.isoformat(), finished_at=None, subject_steamid=config.steamid or None,
                   output_timezone="北京时间",
                   language=config.language, store_country=config.country), status="ok",

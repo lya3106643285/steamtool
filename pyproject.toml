@@ -28,7 +28,7 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["steamtool*"]
+include = ["steamtool*", "schema*"]
 namespaces = false
 
 [tool.setuptools.package-data]

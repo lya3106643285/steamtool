@@ -32,7 +32,7 @@ def project(tmp_path):
     project.mkdir()
     for name in ('main.py', 'start', 'stop'):
         shutil.copy2(ROOT / name, project / name)
-    for name in ('steamtool',):
+    for name in ('steamtool', 'schema'):
         shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__'))
     # Use the interpreter running the suite; tests have no fixed developer env path.
     (project / '.conda').symlink_to(Path(sys.prefix), target_is_directory=True)
